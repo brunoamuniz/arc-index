@@ -1,38 +1,53 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
+# Dependencies
 /node_modules
 /.pnp
 .pnp.js
 .yarn/install-state.gz
+.pnpm-store
 
-# testing
+# Testing
 /coverage
+*.lcov
+.nyc_output
 
-# next.js
+# Next.js
 /.next/
 /out/
+.next
+out
 
-# production
+# Production
 /build
+dist
 
-# misc
+# Misc
 .DS_Store
 *.pem
+*.log
 
-# debug
+# Debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# local env files
-.env*.local
+# Local env files - CRITICAL: Never commit these!
 .env
+.env*.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+.env.*.local
 
-# vercel
+# Vercel
 .vercel
+.vercel.json
 
-# typescript
+# TypeScript
 *.tsbuildinfo
 next-env.d.ts
 
@@ -42,8 +57,116 @@ next-env.d.ts
 *.swp
 *.swo
 *~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+Desktop.ini
 
+# Supabase
+.supabase/
+supabase/.temp/
+
+# Hardhat / Contracts
+packages/contracts/cache/
+packages/contracts/artifacts/
+packages/contracts/typechain-types/
+packages/contracts/coverage/
+packages/contracts/.openzeppelin/
+packages/contracts/hardhat.config.local.ts
+packages/contracts/.env
+packages/contracts/.env.local
+
+# Contract deployment artifacts
+deployments/
+.openzeppelin/
+.openzeppelin/*.json
+
+# Indexer
+indexer/dist/
+indexer/.env
+indexer/.env.local
+indexer/*.log
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+
+# Lock files (optional - some teams prefer to commit these)
+# Uncomment if you want to ignore lock files
+# package-lock.json
+# pnpm-lock.yaml
+# yarn.lock
+
+# Sensitive data patterns - Extra protection
+**/secrets/
+**/*secret*
+**/*private*
+**/*key*
+**/*token*
+**/*password*
+**/*credential*
+**/.env*
+!.env.example
+!.env.template
+**/config/secrets.*
+**/config/*.secret.*
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Build outputs
+*.map
+*.min.js
+*.min.css
+
+# Generated files
+public/favicon.ico
+# Keep favicon.svg but ignore generated .ico if created manually
+
+# Setup scripts with credentials
+setup-env.sh
+
+# Temporary documentation files (status, completion summaries, quick fixes)
+START_HERE.md
+COMPLETION_SUMMARY.md
+FINAL_STATUS.md
+STATUS.md
+STATUS_FINAL.md
+TEST_RESULTS.md
+TESTING_SUMMARY.md
+APPLY_MIGRATIONS_NOW.md
+MIGRATIONS_APPLIED.md
+CONTRACTS_DEPLOYED.md
+DOCUMENTATION_REVIEW.md
+NEXT_STEPS.md
+QUICK_FIX.md
+DEBUG_ERROR.md
+FIX_CURATOR_ROLE.md
+SET_CURATOR_ROLE.md
+CHAIN_ID_UPDATE.md

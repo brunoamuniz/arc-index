@@ -1,3 +1,6 @@
+"use client"
+
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -5,34 +8,50 @@ import { Badge } from "@/components/ui/badge"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
 import { ArrowRight, CheckCircle2, Star, DollarSign, Shield, Sparkles } from "lucide-react"
+import { projectsAPI } from "@/lib/api/client"
+import type { ProjectWithAggregates } from "@/packages/shared"
 
 export default function LandingPage() {
-  const featuredProjects = [
-    {
-      name: "DeFi Protocol",
-      description: "Next-generation automated market maker",
-      category: "DeFi",
-      rating: 4.8,
-      funded: 15000,
-      image: "/defi-protocol-blockchain.jpg",
-    },
-    {
-      name: "NFT Marketplace",
-      description: "Curated digital art trading platform",
-      category: "NFT",
-      rating: 4.6,
-      funded: 12000,
-      image: "/nft-marketplace-digital.jpg",
-    },
-    {
-      name: "GameFi Platform",
-      description: "Play-to-earn gaming ecosystem",
-      category: "Gaming",
-      rating: 4.9,
-      funded: 20000,
-      image: "/gamefi-platform-gaming.jpg",
-    },
-  ]
+  const [featuredProjects, setFeaturedProjects] = useState<ProjectWithAggregates[]>([])
+  const [isLoadingProjects, setIsLoadingProjects] = useState(true)
+
+  useEffect(() => {
+    // Only load on client side to avoid SSR issues
+    if (typeof window !== 'undefined') {
+      loadFeaturedProjects()
+    }
+  }, [])
+
+  async function loadFeaturedProjects() {
+    try {
+      setIsLoadingProjects(true)
+      // Fetch newest projects (most reliable, works even without ratings)
+      const response = await projectsAPI.list({
+        sort: 'newest',
+        limit: 3,
+        offset: 0,
+      })
+      setFeaturedProjects(response.projects || [])
+    } catch (error: any) {
+      // Silently handle errors - don't spam console for expected failures
+      // The page will gracefully show "No featured projects yet" message
+      if (process.env.NODE_ENV === 'development') {
+        console.warn("Error loading featured projects (this is ok if no projects exist):", error?.message || error)
+      }
+      setFeaturedProjects([])
+    } finally {
+      setIsLoadingProjects(false)
+    }
+  }
+
+  function formatUSDC(amount: number) {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount)
+  }
 
   return (
     <div className="min-h-screen">
@@ -173,46 +192,83 @@ export default function LandingPage() {
               <Link href="/explore">View All</Link>
             </Button>
           </div>
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {featuredProjects.map((project, i) => (
-              <Card
-                key={i}
-                className="group overflow-hidden border-border/40 bg-card/50 transition-all hover:border-primary/50"
-              >
-                <div className="aspect-video overflow-hidden">
-                  <img
-                    src={project.image || "/placeholder.svg"}
-                    alt={project.name}
-                    className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                  />
-                </div>
-                <CardContent className="p-6">
-                  <div className="mb-3 flex items-start justify-between">
-                    <div>
-                      <h3 className="mb-1 font-semibold">{project.name}</h3>
-                      <p className="text-sm text-muted-foreground">{project.description}</p>
+          {isLoadingProjects ? (
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {[1, 2, 3].map((i) => (
+                <Card key={i} className="border-border/40 bg-card/50">
+                  <div className="aspect-video animate-pulse bg-muted" />
+                  <CardContent className="p-6">
+                    <div className="mb-3 h-4 w-3/4 animate-pulse rounded bg-muted" />
+                    <div className="mb-4 h-3 w-full animate-pulse rounded bg-muted" />
+                    <div className="flex items-center justify-between">
+                      <div className="h-4 w-16 animate-pulse rounded bg-muted" />
+                      <div className="h-4 w-20 animate-pulse rounded bg-muted" />
                     </div>
-                  </div>
-                  <div className="mb-4 flex items-center gap-2">
-                    <Badge variant="secondary" className="text-xs">
-                      {project.category}
-                    </Badge>
-                    <Badge variant="outline" className="gap-1 border-primary/30 bg-primary/10 text-xs text-primary">
-                      <Shield className="h-3 w-3" />
-                      Certified
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-1 text-muted-foreground">
-                      <Star className="h-4 w-4 fill-primary text-primary" />
-                      <span>{project.rating}</span>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : featuredProjects.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">No featured projects yet. Be the first to submit!</p>
+              <Button asChild className="mt-4">
+                <Link href="/submit">Submit a Project</Link>
+              </Button>
+            </div>
+          ) : (
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {featuredProjects.map((project) => (
+                <Link key={project.id} href={`/project/${project.id}`}>
+                  <Card className="group h-full overflow-hidden border-border/40 bg-card/50 transition-all hover:border-primary/50 hover:shadow-lg">
+                    <div className="aspect-video overflow-hidden">
+                      {project.image_url ? (
+                        <img
+                          src={project.image_url}
+                          alt={project.name}
+                          className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center bg-muted text-muted-foreground">
+                          No Image
+                        </div>
+                      )}
                     </div>
-                    <div className="font-mono text-primary">${project.funded.toLocaleString()} USDC</div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                    <CardContent className="p-6">
+                      <div className="mb-3 flex items-start justify-between">
+                        <div className="flex-1">
+                          <h3 className="mb-1 font-semibold line-clamp-1">{project.name}</h3>
+                          <p className="text-sm text-muted-foreground line-clamp-2">{project.description}</p>
+                        </div>
+                      </div>
+                      <div className="mb-4 flex items-center gap-2">
+                        <Badge variant="secondary" className="text-xs">
+                          {project.category}
+                        </Badge>
+                        {project.nft_token_id && (
+                          <Badge variant="outline" className="gap-1 border-primary/30 bg-primary/10 text-xs text-primary">
+                            <Shield className="h-3 w-3" />
+                            Certified
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                          <Star className="h-4 w-4 fill-primary text-primary" />
+                          <span>{project.rating_agg?.avg_stars ? project.rating_agg.avg_stars.toFixed(1) : "0.0"}</span>
+                          {project.rating_agg?.ratings_count ? (
+                            <span className="text-xs">({project.rating_agg.ratings_count})</span>
+                          ) : null}
+                        </div>
+                        <div className="font-mono text-primary">
+                          {formatUSDC(Number(project.funding_agg?.total_usdc || 0))}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 

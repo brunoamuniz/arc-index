@@ -7,10 +7,11 @@ interface StarRatingProps {
   value: number
   onChange?: (value: number) => void
   readonly?: boolean
+  disabled?: boolean
   size?: "sm" | "md" | "lg"
 }
 
-export function StarRating({ value, onChange, readonly = false, size = "md" }: StarRatingProps) {
+export function StarRating({ value, onChange, readonly = false, disabled = false, size = "md" }: StarRatingProps) {
   const stars = [1, 2, 3, 4, 5]
   const sizeClasses = {
     sm: "h-4 w-4",
@@ -24,8 +25,8 @@ export function StarRating({ value, onChange, readonly = false, size = "md" }: S
         <button
           key={star}
           type="button"
-          onClick={() => !readonly && onChange?.(star)}
-          disabled={readonly}
+          onClick={() => !readonly && !disabled && onChange?.(star)}
+          disabled={readonly || disabled}
           className={cn(
             "transition-colors",
             !readonly && "cursor-pointer hover:scale-110",
