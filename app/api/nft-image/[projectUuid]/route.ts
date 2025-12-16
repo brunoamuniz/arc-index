@@ -40,21 +40,20 @@ export async function GET(
       : 'Approved'
 
     return new ImageResponse(
-      (
-        <div
-          style={{
-            background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0a0a0a 100%)',
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontFamily: 'system-ui',
-            position: 'relative',
-            padding: '80px',
-          }}
-        >
+      <div
+        style={{
+          background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0a0a0a 100%)',
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontFamily: 'system-ui',
+          position: 'relative',
+          padding: '80px',
+        }}
+      >
           {/* Decorative border */}
           <div
             style={{
@@ -246,8 +245,7 @@ export async function GET(
           >
             arcindex.xyz
           </div>
-        </div>
-      ),
+        </div>,
       {
         ...size,
       }
