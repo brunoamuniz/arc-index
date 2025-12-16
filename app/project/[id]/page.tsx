@@ -381,6 +381,10 @@ export default function ProjectDetailsPage() {
   }
 
   const handleRegisterOnChain = async () => {
+    setFeatureNotSupportedDialogOpen(true)
+    return
+    
+    /* Temporarily disabled - Feature Not Available
     if (!isConnected || !address) {
       toast({
         title: "Wallet not connected",
@@ -1044,6 +1048,7 @@ export default function ProjectDetailsPage() {
     } finally {
       setIsRegistering(false)
     }
+    */
   }
 
   function formatAddress(address: string) {
