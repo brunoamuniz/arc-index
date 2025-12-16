@@ -55,6 +55,29 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Build count query first (without pagination)
+    let countQuery = supabaseAdmin!
+      .from('arcindex_projects')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'Approved')
+      .is('deleted_at', null);
+
+    // Apply filters to count query
+    if (params.category) {
+      countQuery = countQuery.eq('category', params.category);
+    }
+    if (params.q) {
+      countQuery = countQuery.or(`name.ilike.%${params.q}%,description.ilike.%${params.q}%`);
+    }
+
+    // Execute count query
+    const { count, error: countError } = await countQuery;
+
+    if (countError) {
+      throw countError;
+    }
+
+    // Build data query
     let query = supabaseAdmin!
       .from('arcindex_projects')
       .select(`
@@ -102,7 +125,11 @@ export async function GET(request: NextRequest) {
       funding_agg: p.arcindex_funding_agg?.[0] || null,
     }));
 
-    return NextResponse.json({ projects, count: projects.length });
+    return NextResponse.json({ 
+      projects, 
+      count: projects.length,
+      total: count || 0 
+    });
   } catch (error: any) {
     console.error('Error fetching projects:', error);
     

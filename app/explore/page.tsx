@@ -9,10 +9,19 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
-import { Search, Star, Shield, Github, Twitter, Linkedin, MessageCircle } from "lucide-react"
+import { Search, Star, Shield, Github, Twitter, Linkedin, MessageCircle, ExternalLink } from "lucide-react"
 import { projectsAPI } from "@/lib/api/client"
 import type { ProjectWithAggregates } from "@/packages/shared"
 import { useToast } from "@/hooks/use-toast"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+  PaginationEllipsis,
+} from "@/components/ui/pagination"
 
 export default function ExplorePage() {
   const router = useRouter()
@@ -21,25 +30,34 @@ export default function ExplorePage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string>("")
   const [sortBy, setSortBy] = useState<'newest' | 'top_rated' | 'most_funded'>('newest')
+  const [totalProjects, setTotalProjects] = useState(0)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage] = useState(9) // 3 columns x 3 rows
   const { toast } = useToast()
 
   const categories = ["DeFi", "NFT", "Gaming", "DAO", "Infrastructure", "Social", "Tools", "Other"]
 
   useEffect(() => {
-    loadProjects()
+    setCurrentPage(1) // Reset to first page when filters change
   }, [selectedCategory, sortBy, searchQuery])
+
+  useEffect(() => {
+    loadProjects()
+  }, [selectedCategory, sortBy, searchQuery, currentPage])
 
   async function loadProjects() {
     try {
       setIsLoading(true)
+      const offset = (currentPage - 1) * itemsPerPage
       const response = await projectsAPI.list({
         category: selectedCategory || undefined,
         sort: sortBy,
         q: searchQuery || undefined,
-        limit: 50,
-        offset: 0,
+        limit: itemsPerPage,
+        offset: offset,
       })
       setProjects(response.projects)
+      setTotalProjects(response.total || 0)
     } catch (error: any) {
       console.error('Error loading projects:', error)
       const errorMessage = error.message || error.error || "Failed to load projects"
@@ -90,6 +108,11 @@ export default function ExplorePage() {
             <p className="text-lg text-muted-foreground">
               Discover innovative blockchain projects on Arc Network
             </p>
+            {!isLoading && totalProjects > 0 && (
+              <p className="mt-2 text-sm text-muted-foreground">
+                Showing {projects.length} of {totalProjects} {totalProjects === 1 ? 'project' : 'projects'}
+              </p>
+            )}
           </div>
 
           {/* Search and Filters */}
@@ -180,10 +203,24 @@ export default function ExplorePage() {
                     </div>
                     <CardContent className="p-6">
                       <div className="mb-2 flex items-start justify-between">
-                        <div>
-                          <h3 className="mb-1 text-lg font-semibold group-hover:text-primary">
-                            {project.name}
-                          </h3>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h3 className="text-lg font-semibold group-hover:text-primary">
+                              {project.name}
+                            </h3>
+                            {project.website_url && project.website_url.trim() && (
+                              <a
+                                href={project.website_url.startsWith('http') ? project.website_url : `https://${project.website_url}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex items-center text-primary hover:text-primary/80 transition-colors"
+                                title="Visit website"
+                              >
+                                <ExternalLink className="h-4 w-4" />
+                              </a>
+                            )}
+                          </div>
                           <Badge variant="outline">{project.category}</Badge>
                         </div>
                       </div>
@@ -322,6 +359,109 @@ export default function ExplorePage() {
                     </CardContent>
                 </Card>
               ))}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {!isLoading && totalProjects > itemsPerPage && (
+            <div className="mt-12 flex justify-center">
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        if (currentPage > 1) {
+                          setCurrentPage(currentPage - 1)
+                          window.scrollTo({ top: 0, behavior: 'smooth' })
+                        }
+                      }}
+                      className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                    />
+                  </PaginationItem>
+                  
+                  {(() => {
+                    const totalPages = Math.ceil(totalProjects / itemsPerPage)
+                    const pages: (number | 'ellipsis')[] = []
+                    
+                    if (totalPages <= 7) {
+                      // Show all pages if 7 or fewer
+                      for (let i = 1; i <= totalPages; i++) {
+                        pages.push(i)
+                      }
+                    } else {
+                      // Always show first page
+                      pages.push(1)
+                      
+                      if (currentPage <= 4) {
+                        // Near the start: 1, 2, 3, 4, 5, ..., last
+                        for (let i = 2; i <= 5; i++) {
+                          pages.push(i)
+                        }
+                        pages.push('ellipsis')
+                        pages.push(totalPages)
+                      } else if (currentPage >= totalPages - 3) {
+                        // Near the end: 1, ..., last-4, last-3, last-2, last-1, last
+                        pages.push('ellipsis')
+                        for (let i = totalPages - 4; i <= totalPages; i++) {
+                          pages.push(i)
+                        }
+                      } else {
+                        // In the middle: 1, ..., current-1, current, current+1, ..., last
+                        pages.push('ellipsis')
+                        for (let i = currentPage - 1; i <= currentPage + 1; i++) {
+                          pages.push(i)
+                        }
+                        pages.push('ellipsis')
+                        pages.push(totalPages)
+                      }
+                    }
+                    
+                    return pages.map((page, index) => {
+                      if (page === 'ellipsis') {
+                        return (
+                          <PaginationItem key={`ellipsis-${index}`}>
+                            <PaginationEllipsis />
+                          </PaginationItem>
+                        )
+                      }
+                      
+                      return (
+                        <PaginationItem key={page}>
+                          <PaginationLink
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              setCurrentPage(page)
+                              window.scrollTo({ top: 0, behavior: 'smooth' })
+                            }}
+                            isActive={currentPage === page}
+                            className="cursor-pointer"
+                          >
+                            {page}
+                          </PaginationLink>
+                        </PaginationItem>
+                      )
+                    })
+                  })()}
+
+                  <PaginationItem>
+                    <PaginationNext
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        const totalPages = Math.ceil(totalProjects / itemsPerPage)
+                        if (currentPage < totalPages) {
+                          setCurrentPage(currentPage + 1)
+                          window.scrollTo({ top: 0, behavior: 'smooth' })
+                        }
+                      }}
+                      className={currentPage >= Math.ceil(totalProjects / itemsPerPage) ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
             </div>
           )}
         </div>

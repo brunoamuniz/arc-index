@@ -159,7 +159,7 @@ export const projectsAPI = {
     q?: string;
     limit?: number;
     offset?: number;
-  }): Promise<{ projects: ProjectWithAggregates[]; count: number }> {
+  }): Promise<{ projects: ProjectWithAggregates[]; count: number; total: number }> {
     const searchParams = new URLSearchParams();
     if (params?.category) searchParams.set('category', params.category);
     if (params?.sort) searchParams.set('sort', params.sort);
