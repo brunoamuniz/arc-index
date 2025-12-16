@@ -113,9 +113,9 @@ export default function ProjectDetailsPage() {
       const projectName = project?.name || "this project"
       
       const tweetText = encodeURIComponent(
-        `🚀 ${projectName}\n\n` +
-        `Check it out on @arc #ARCTestnet\n\n` +
-        `${shareUrl}\n\n` +
+        `🚀 ${projectName} is building on @arc\n\n` +
+        `Discover this project live on #ARCTestnet and explore what they're creating in the Web3 ecosystem.\n\n` +
+        `👉 ${shareUrl}\n\n` +
         `#arc #web3 #defi`
       )
       
