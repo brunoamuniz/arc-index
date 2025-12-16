@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -8,12 +9,13 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
-import { Search, Star, Shield, Github, Twitter, Linkedin, Share2 } from "lucide-react"
+import { Search, Star, Shield, Github, Twitter, Linkedin, MessageCircle } from "lucide-react"
 import { projectsAPI } from "@/lib/api/client"
 import type { ProjectWithAggregates } from "@/packages/shared"
 import { useToast } from "@/hooks/use-toast"
 
 export default function ExplorePage() {
+  const router = useRouter()
   const [projects, setProjects] = useState<ProjectWithAggregates[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
@@ -61,6 +63,9 @@ export default function ExplorePage() {
   }
 
   function formatAddress(address: string) {
+    if (!address || address.length < 10) {
+      return address || 'Unknown'
+    }
     return `${address.slice(0, 6)}...${address.slice(-4)}`
   }
 
@@ -147,8 +152,11 @@ export default function ExplorePage() {
           ) : (
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {projects.map((project) => (
-                <Link key={project.id} href={`/project/${project.id}`}>
-                  <Card className="group h-full cursor-pointer transition-all hover:shadow-lg">
+                <Card 
+                  key={project.id}
+                  className="group h-full cursor-pointer transition-all hover:shadow-lg"
+                  onClick={() => router.push(`/project/${project.id}`)}
+                >
                     <div className="relative aspect-video w-full overflow-hidden rounded-t-lg bg-muted">
                       {project.image_url ? (
                         <img
@@ -187,7 +195,7 @@ export default function ExplorePage() {
                           <div className="flex items-center gap-1">
                             <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
                             <span className="font-medium">
-                              {project.rating_agg?.avg_stars.toFixed(1) || "0.0"}
+                              {project.rating_agg?.avg_stars ? project.rating_agg.avg_stars.toFixed(1) : "0.0"}
                             </span>
                             <span className="text-muted-foreground">
                               ({project.rating_agg?.ratings_count || 0})
@@ -200,10 +208,119 @@ export default function ExplorePage() {
                         <div className="flex items-center gap-4 text-xs text-muted-foreground">
                           <span>{formatAddress(project.owner_wallet)}</span>
                         </div>
+                        
+                        {/* Social Links - Only show if they exist */}
+                        {(project.x_url || project.github_url || project.linkedin_url || project.discord_url || project.discord_username) && (
+                          <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-border/40">
+                            {project.x_url && project.x_url.trim() && (
+                              <a
+                                href={project.x_url.startsWith('http') ? project.x_url : `https://${project.x_url}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                title="Twitter/X"
+                              >
+                                <Twitter className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">X</span>
+                              </a>
+                            )}
+                            {project.github_url && project.github_url.trim() && (
+                              <a
+                                href={project.github_url.startsWith('http') ? project.github_url : `https://${project.github_url}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                title="GitHub"
+                              >
+                                <Github className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">GitHub</span>
+                              </a>
+                            )}
+                            {project.linkedin_url && project.linkedin_url.trim() && (
+                              <a
+                                href={project.linkedin_url.startsWith('http') ? project.linkedin_url : `https://${project.linkedin_url}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                title="LinkedIn"
+                              >
+                                <Linkedin className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">LinkedIn</span>
+                              </a>
+                            )}
+                            {project.discord_url && project.discord_url.trim() && (
+                              <a
+                                href={project.discord_url.startsWith('http') ? project.discord_url : `https://${project.discord_url}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                title="Discord"
+                              >
+                                <MessageCircle className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">Discord</span>
+                              </a>
+                            )}
+                            {project.discord_username && project.discord_username.trim() && !project.discord_url && (
+                              <div
+                                onClick={async (e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  try {
+                                    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+                                      await navigator.clipboard.writeText(project.discord_username || '')
+                                      toast({
+                                        title: "Discord username copied!",
+                                        description: `${project.discord_username} copied to clipboard`,
+                                      })
+                                    } else {
+                                      // Fallback for browsers without clipboard API
+                                      const textArea = document.createElement('textarea')
+                                      textArea.value = project.discord_username || ''
+                                      textArea.style.position = 'fixed'
+                                      textArea.style.left = '-999999px'
+                                      document.body.appendChild(textArea)
+                                      textArea.select()
+                                      document.execCommand('copy')
+                                      document.body.removeChild(textArea)
+                                      toast({
+                                        title: "Discord username copied!",
+                                        description: `${project.discord_username} copied to clipboard`,
+                                      })
+                                    }
+                                  } catch (err) {
+                                    console.error('Failed to copy Discord username:', err)
+                                    toast({
+                                      title: "Copy failed",
+                                      description: "Could not copy Discord username. Please copy manually.",
+                                      variant: "destructive",
+                                    })
+                                  }
+                                }}
+                                onMouseDown={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                }}
+                                onMouseUp={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                }}
+                                style={{ pointerEvents: 'auto' }}
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer relative z-10"
+                                title="Click to copy Discord username"
+                              >
+                                <MessageCircle className="h-3.5 w-3.5" />
+                                <span>{project.discord_username}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </CardContent>
-                  </Card>
-                </Link>
+                </Card>
               ))}
             </div>
           )}

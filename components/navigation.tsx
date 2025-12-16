@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Wallet } from "lucide-react"
+import { Wallet, Droplet } from "lucide-react"
 import { useWallet } from "@/lib/wallet/hooks"
 import { useUserRole } from "@/lib/auth/use-user-role"
 import { useToast } from "@/hooks/use-toast"
@@ -33,12 +33,23 @@ export function Navigation() {
         }
       }, 500) // Increased delay to ensure state is updated
     } catch (err: any) {
-      // Error is already handled in the hook and shown in state
-      toast({
-        title: "Connection failed",
-        description: err.message || error || "Failed to connect wallet",
-        variant: "destructive",
-      })
+      // Determine appropriate title and variant based on error type
+      const isUserCancellation = err.message?.includes('cancelled') || 
+                                 err.message?.includes('Signature request was cancelled');
+      
+      if (isUserCancellation) {
+        toast({
+          title: "Signature cancelled",
+          description: "You cancelled the signature request. Please try again when ready.",
+          variant: "default",
+        })
+      } else {
+        toast({
+          title: "Connection failed",
+          description: err.message || error || "Failed to connect wallet",
+          variant: "destructive",
+        })
+      }
     }
   }
 
@@ -84,7 +95,18 @@ export function Navigation() {
             )}
           </div>
         </div>
-        <div>
+        <div className="flex items-center gap-2">
+          <Button 
+            asChild
+            variant="ghost" 
+            size="sm" 
+            className="gap-2 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <Link href="https://easyfaucetarc.xyz/" target="_blank" rel="noopener noreferrer">
+              <Droplet className="h-3 w-3" />
+              Need Faucet?
+            </Link>
+          </Button>
           {!isConnected ? (
             <Button 
               onClick={handleConnect} 

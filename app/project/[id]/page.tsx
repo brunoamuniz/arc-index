@@ -56,6 +56,7 @@ export default function ProjectDetailsPage() {
   const [isRegistering, setIsRegistering] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [featureNotSupportedDialogOpen, setFeatureNotSupportedDialogOpen] = useState(false)
   const { toast } = useToast()
   const { isConnected, address } = useWallet()
   const { isCuratorOrAdmin } = useUserRole()
@@ -102,7 +103,11 @@ export default function ProjectDetailsPage() {
   }
 
   const handleShare = (platform: string) => {
-    const url = typeof window !== "undefined" ? window.location.href : ""
+    // Use production URL for sharing, fallback to current location for local development
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://arcindex.xyz'
+    const currentUrl = typeof window !== "undefined" ? window.location.href : ""
+    const shareUrl = currentUrl.replace(/^https?:\/\/[^/]+/, baseUrl)
+    
     if (platform === "twitter") {
       // Create an engaging tweet with hashtags
       const projectName = project?.name || "this project"
@@ -110,7 +115,7 @@ export default function ProjectDetailsPage() {
       const tweetText = encodeURIComponent(
         `🚀 ${projectName}\n\n` +
         `Check it out on @arc #ARCTestnet\n\n` +
-        `${url}\n\n` +
+        `${shareUrl}\n\n` +
         `#arc #web3 #defi`
       )
       
@@ -119,13 +124,13 @@ export default function ProjectDetailsPage() {
         "_blank",
       )
     } else if (platform === "copy") {
-      navigator.clipboard.writeText(url)
+      navigator.clipboard.writeText(shareUrl)
       toast({
         title: "Link copied!",
         description: "Project URL has been copied to clipboard",
       })
     } else if (platform === "discord") {
-      navigator.clipboard.writeText(url)
+      navigator.clipboard.writeText(shareUrl)
       toast({
         title: "Link copied!",
         description: "Share this link in Discord",
@@ -134,6 +139,11 @@ export default function ProjectDetailsPage() {
   }
 
   const handleDonate = async () => {
+    setFeatureNotSupportedDialogOpen(true)
+    return
+    
+    // Original code commented out - feature not supported yet
+    /*
     if (!donationAmount || Number.parseFloat(donationAmount) <= 0) {
       toast({
         title: "Invalid amount",
@@ -244,9 +254,15 @@ export default function ProjectDetailsPage() {
     } finally {
       setIsFunding(false)
     }
+    */
   }
 
   const handleRate = async (stars: number) => {
+    setFeatureNotSupportedDialogOpen(true)
+    return
+    
+    // Original code commented out - feature not supported yet
+    /*
     if (!isConnected || !address) {
       toast({
         title: "Wallet not connected",
@@ -361,6 +377,7 @@ export default function ProjectDetailsPage() {
     } finally {
       setIsRating(false)
     }
+    */
   }
 
   const handleRegisterOnChain = async () => {
@@ -434,8 +451,10 @@ export default function ProjectDetailsPage() {
         })
 
         // Extract project_id from ProjectCreated event in the receipt
+        const projectRegistryAddress = process.env.NEXT_PUBLIC_PROJECT_REGISTRY_ADDRESS as Address
         const projectCreatedEventAbi = parseAbi([
           'event ProjectCreated(uint256 indexed projectId, address indexed owner, string metadataUri)',
+          'function nextProjectId() external view returns (uint256)',
         ])
 
         let onChainProjectId: bigint | null = null
@@ -443,7 +462,15 @@ export default function ProjectDetailsPage() {
         // Try to decode the event from logs
         try {
           const logs = receipt.logs
-          for (const log of logs) {
+          console.log('Total logs in receipt:', logs.length)
+          
+          // Filter logs by ProjectRegistry address
+          const projectRegistryLogs = logs.filter(log => 
+            log.address.toLowerCase() === projectRegistryAddress.toLowerCase()
+          )
+          console.log('ProjectRegistry logs:', projectRegistryLogs.length)
+          
+          for (const log of projectRegistryLogs) {
             try {
               const decoded = decodeEventLog({
                 abi: projectCreatedEventAbi,
@@ -451,22 +478,38 @@ export default function ProjectDetailsPage() {
                 topics: log.topics,
               })
               
+              console.log('Decoded event:', decoded)
+              
               if (decoded.eventName === 'ProjectCreated') {
                 onChainProjectId = decoded.args.projectId as bigint
+                console.log('✅ Extracted project_id from event:', onChainProjectId)
                 break
               }
             } catch (e) {
               // Not the event we're looking for, continue
+              console.log('Event decode attempt failed (not ProjectCreated):', e)
             }
           }
         } catch (e) {
           console.error('Error decoding event:', e)
         }
 
+        // Fallback: Read nextProjectId from contract and subtract 1
         if (!onChainProjectId) {
-          // Fallback: try to read nextProjectId from contract before creation
-          // This is not ideal but works if event decoding fails
-          throw new Error('Could not extract project_id from transaction. Please try again or wait for the indexer to process.')
+          console.log('Event decoding failed, trying fallback: reading nextProjectId from contract...')
+          try {
+            const nextProjectId = await publicClient.readContract({
+              address: projectRegistryAddress,
+              abi: projectCreatedEventAbi,
+              functionName: 'nextProjectId',
+            })
+            // The project_id is nextProjectId - 1 (since nextProjectId was incremented after creation)
+            onChainProjectId = (nextProjectId as bigint) - BigInt(1)
+            console.log('✅ Extracted project_id from nextProjectId:', onChainProjectId)
+          } catch (e) {
+            console.error('Fallback also failed:', e)
+            throw new Error(`Could not extract project_id from transaction. Transaction hash: ${receipt.transactionHash}. Please check the transaction on the explorer: https://testnet.arcscan.app/tx/${receipt.transactionHash}`)
+          }
         }
 
         const onChainProjectIdNumber = Number(onChainProjectId)
@@ -482,7 +525,6 @@ export default function ProjectDetailsPage() {
 
         // Now proceed with approval and NFT minting
         const metadataUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://arcindex.xyz'}/api/metadata/${project.id}`
-        const PROJECT_REGISTRY_ADDRESS = process.env.NEXT_PUBLIC_PROJECT_REGISTRY_ADDRESS as Address
         const APPROVAL_NFT_ADDRESS = process.env.NEXT_PUBLIC_APPROVAL_NFT_ADDRESS as Address
         
         const projectRegistryAbi = parseAbi([
@@ -497,7 +539,7 @@ export default function ProjectDetailsPage() {
         let onChainOwner: Address | null = null
         try {
           const [owner, status] = await publicClient.readContract({
-            address: PROJECT_REGISTRY_ADDRESS,
+            address: projectRegistryAddress,
             abi: projectRegistryAbi,
             functionName: 'getProject',
             args: [onChainProjectId],
@@ -522,7 +564,7 @@ export default function ProjectDetailsPage() {
           let simulationError: string | null = null
           try {
             await publicClient.simulateContract({
-              address: PROJECT_REGISTRY_ADDRESS,
+              address: projectRegistryAddress,
               abi: projectRegistryAbi,
               functionName: 'submit',
               args: [onChainProjectId],
@@ -555,7 +597,7 @@ export default function ProjectDetailsPage() {
 
           const submitHash = await walletClient.sendTransaction({
             account: address as Address,
-            to: PROJECT_REGISTRY_ADDRESS,
+            to: projectRegistryAddress,
             data: submitData,
           })
 
@@ -594,7 +636,7 @@ export default function ProjectDetailsPage() {
           try {
             await new Promise(resolve => setTimeout(resolve, 2000)) // Wait a bit for state to update
             const [ownerAfterSubmit, statusAfterSubmit] = await publicClient.readContract({
-              address: PROJECT_REGISTRY_ADDRESS,
+              address: projectRegistryAddress,
               abi: projectRegistryAbi,
               functionName: 'getProject',
               args: [onChainProjectId],
@@ -618,7 +660,7 @@ export default function ProjectDetailsPage() {
         let statusBeforeApprove: number
         try {
           const [owner, status] = await publicClient.readContract({
-            address: PROJECT_REGISTRY_ADDRESS,
+            address: projectRegistryAddress,
             abi: projectRegistryAbi,
             functionName: 'getProject',
             args: [onChainProjectId],
@@ -649,7 +691,7 @@ export default function ProjectDetailsPage() {
           // Simulate the approval transaction first to catch errors early
           try {
             await publicClient.simulateContract({
-              address: PROJECT_REGISTRY_ADDRESS,
+              address: projectRegistryAddress,
               abi: projectRegistryAbi,
               functionName: 'approve',
               args: [onChainProjectId],
@@ -682,7 +724,7 @@ export default function ProjectDetailsPage() {
 
           const approveHash = await walletClient.sendTransaction({
             account: address as Address,
-            to: PROJECT_REGISTRY_ADDRESS,
+            to: projectRegistryAddress,
             data: approveData,
           })
 
@@ -722,7 +764,7 @@ export default function ProjectDetailsPage() {
 
         const nftHash = await walletClient.sendTransaction({
           account: address as Address,
-          to: PROJECT_REGISTRY_ADDRESS,
+          to: projectRegistryAddress,
           data: mintData,
         })
 
@@ -734,7 +776,7 @@ export default function ProjectDetailsPage() {
           let revertReason = ''
           try {
             // Check if it's a function not found error
-            const code = await publicClient.getBytecode({ address: PROJECT_REGISTRY_ADDRESS })
+            const code = await publicClient.getBytecode({ address: projectRegistryAddress })
             if (code && !code.includes('mintApprovalNFT'.slice(0, 8))) {
               revertReason = '\n\n⚠️ The ProjectRegistry contract does not have the "mintApprovalNFT" function. The contract needs to be redeployed with the updated code.'
             }
@@ -1391,6 +1433,23 @@ export default function ProjectDetailsPage() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Feature Not Supported Dialog */}
+      <AlertDialog open={featureNotSupportedDialogOpen} onOpenChange={setFeatureNotSupportedDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Feature Not Available</AlertDialogTitle>
+            <AlertDialogDescription>
+              Feature not supported yet, wait for a few days.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setFeatureNotSupportedDialogOpen(false)}>
+              OK
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

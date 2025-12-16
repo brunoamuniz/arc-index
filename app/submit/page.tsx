@@ -16,6 +16,7 @@ import { ChevronRight, ChevronLeft, Upload, Wallet } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useWallet } from "@/lib/wallet/hooks"
 import { projectsAPI } from "@/lib/api/client"
+import { ImagePreview } from "@/components/image-preview"
 
 const categories = ["DeFi", "NFT", "Gaming", "DAO", "Infrastructure", "Social", "Tools", "Other"]
 
@@ -30,6 +31,7 @@ export default function SubmitProjectPage() {
   const [isEditMode, setIsEditMode] = useState(false)
   const [projectId, setProjectId] = useState<string | null>(null)
   const [projectStatus, setProjectStatus] = useState<string | null>(null)
+  const [imageConfirmed, setImageConfirmed] = useState(false)
   const [formData, setFormData] = useState({
     name: "",
     shortDescription: "",
@@ -75,7 +77,7 @@ export default function SubmitProjectPage() {
         website: project.website_url || "",
         linkedin: project.linkedin_url || "",
         contractAddress: project.contracts_json?.[0]?.address || "",
-      })
+  })
 
       // If project has image, go to step 2
       if (project.image_url) {
@@ -101,6 +103,21 @@ export default function SubmitProjectPage() {
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setFormData((prev) => ({ ...prev, image: e.target.files![0] }))
+      setImageConfirmed(false) // Reset confirmation when new image is selected
+    }
+  }
+
+  const handleImageConfirm = () => {
+    setImageConfirmed(true)
+  }
+
+  const handleImageCancel = () => {
+    setFormData((prev) => ({ ...prev, image: null }))
+    setImageConfirmed(false)
+    // Reset file input
+    const fileInput = document.getElementById("image") as HTMLInputElement
+    if (fileInput) {
+      fileInput.value = ""
     }
   }
 
@@ -155,34 +172,34 @@ export default function SubmitProjectPage() {
         }
       } else {
         // Create new project
-        const response = await projectsAPI.create({
-          name: formData.name,
-          description: formData.shortDescription,
+      const response = await projectsAPI.create({
+        name: formData.name,
+        description: formData.shortDescription,
           full_description: formData.longDescription,
-          category: formData.category,
-          x_url: formData.twitter || undefined,
-          github_url: formData.github || undefined,
-          linkedin_url: formData.linkedin || undefined,
-          discord_url: formData.discord || undefined,
+        category: formData.category,
+        x_url: formData.twitter || undefined,
+        github_url: formData.github || undefined,
+        linkedin_url: formData.linkedin || undefined,
+        discord_url: formData.discord || undefined,
           discord_username: formData.discordUsername || undefined,
           website_url: formData.website,
-          contracts_json: formData.contractAddress
+        contracts_json: formData.contractAddress
             ? [{ address: formData.contractAddress, label: "Arc Network" }]
-            : [],
-        })
+          : [],
+      })
 
-        const createdProjectId = response.project.id
-        console.log('Project created with ID:', createdProjectId)
-        
-        setProjectId(createdProjectId)
-        await new Promise(resolve => setTimeout(resolve, 100))
-        
-        toast({
-          title: "Project created!",
-          description: "Now upload an image and submit for review",
-        })
+      const createdProjectId = response.project.id
+      console.log('Project created with ID:', createdProjectId)
+      
+      setProjectId(createdProjectId)
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      toast({
+        title: "Project created!",
+        description: "Now upload an image and submit for review",
+      })
 
-        setStep(2)
+      setStep(2)
       }
     } catch (error: any) {
       console.error("Error saving project:", error)
@@ -246,6 +263,10 @@ export default function SubmitProjectPage() {
         description: "Image uploaded successfully",
       })
 
+      // Reset image confirmation state
+      setImageConfirmed(false)
+      setFormData((prev) => ({ ...prev, image: null }))
+      
       // Move to step 3
       setStep(3)
     } catch (error: any) {
@@ -328,7 +349,7 @@ export default function SubmitProjectPage() {
 
   const isStep1Valid = formData.name && formData.shortDescription && formData.longDescription && formData.category && formData.website
 
-  const isStep2Valid = formData.image !== null
+  const isStep2Valid = formData.image !== null && imageConfirmed
 
   return (
     <div className="min-h-screen">
@@ -589,8 +610,8 @@ export default function SubmitProjectPage() {
                     <p className="text-xs text-muted-foreground">
                       <span className="text-destructive">*</span> Required fields
                     </p>
-                    
-                    <div className="flex justify-end gap-4">
+
+                  <div className="flex justify-end gap-4">
                       {isEditMode && (
                         <Button
                           variant="outline"
@@ -600,15 +621,15 @@ export default function SubmitProjectPage() {
                           Cancel
                         </Button>
                       )}
-                      <Button
+                    <Button
                         onClick={handleCreateOrUpdateProject}
                         disabled={!isStep1Valid || !isConnected || isSubmitting || isLoading}
-                      >
+                    >
                         {isSubmitting 
                           ? (isEditMode ? "Updating..." : "Creating...") 
                           : (isEditMode ? "Update Project" : "Create Project")}
-                        <ChevronRight className="ml-2 h-4 w-4" />
-                      </Button>
+                      <ChevronRight className="ml-2 h-4 w-4" />
+                    </Button>
                     </div>
                   </div>
                 </>
@@ -624,34 +645,51 @@ export default function SubmitProjectPage() {
                       </p>
                     </div>
                   )}
-                  <div className="space-y-2">
-                    <Label htmlFor="image">
-                      Project Banner Image <span className="text-destructive">*</span>
-                    </Label>
-                    <div className="flex items-center gap-4">
-                      <Input
-                        id="image"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleImageChange}
-                        className="cursor-pointer"
-                      />
-                      {formData.image && (
-                        <div className="text-sm text-muted-foreground">
-                          Selected: {formData.image.name}
-                        </div>
-                      )}
+                  
+                  {!formData.image ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="image">
+                        Project Banner Image <span className="text-destructive">*</span>
+                      </Label>
+                      <div className="flex items-center gap-4">
+                        <Input
+                          id="image"
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageChange}
+                          className="cursor-pointer"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Recommended: 1600x900px, max 5MB. The image will be automatically resized and optimized.
+                        You will be able to see a preview before confirming.
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Recommended: 1600x900px, max 5MB. Will be automatically resized and optimized.
-                    </p>
-                  </div>
+                  ) : (
+                    <>
+                      {/* Image Preview Component */}
+                      <ImagePreview
+                        file={formData.image}
+                        onConfirm={handleImageConfirm}
+                        onCancel={handleImageCancel}
+                        aspectRatio={16 / 9}
+                      />
+                    </>
+                  )}
+
+                  {imageConfirmed && formData.image && (
+                    <div className="rounded-lg border border-green-500/50 bg-green-500/10 p-4">
+                      <p className="text-sm text-green-600 dark:text-green-400">
+                        ✓ Image confirmed. Click "Upload Image" to continue.
+                      </p>
+                    </div>
+                  )}
 
                   <div className="space-y-4">
                     <p className="text-xs text-muted-foreground">
                       <span className="text-destructive">*</span> Required fields
                     </p>
-                    
+
                     <div className="flex justify-between">
                       <Button
                         variant="outline"
@@ -714,10 +752,10 @@ export default function SubmitProjectPage() {
                       Back
                     </Button>
                     {!isEditMode || projectStatus !== "Submitted" ? (
-                      <Button
-                        onClick={handleSubmit}
+                    <Button
+                      onClick={handleSubmit}
                         disabled={isSubmitting || projectStatus === "Submitted"}
-                      >
+                    >
                         {isSubmitting 
                           ? "Submitting..." 
                           : projectStatus === "Submitted" 
@@ -729,7 +767,7 @@ export default function SubmitProjectPage() {
                         onClick={() => router.push("/my-projects")}
                       >
                         Done
-                      </Button>
+                    </Button>
                     )}
                   </div>
                 </>

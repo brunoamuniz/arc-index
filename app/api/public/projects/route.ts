@@ -65,9 +65,9 @@ export async function GET(request: NextRequest) {
 
     // Build base URL for project links
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 
-                    process.env.NEXT_PUBLIC_VERCEL_URL ? 
+                    (process.env.NEXT_PUBLIC_VERCEL_URL ? 
                       `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : 
-                      'http://localhost:3000';
+                      'https://arcindex.xyz');
 
     let query = supabaseAdmin!
       .from('arcindex_projects')

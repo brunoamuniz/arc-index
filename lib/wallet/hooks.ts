@@ -98,13 +98,25 @@ export function useWallet() {
         error: null,
       });
     } catch (error: any) {
-      console.error('Error connecting wallet:', error);
+      // Don't log user cancellation as an error
+      const isUserCancellation = error.message?.includes('User rejected') || 
+                                 error.message?.includes('rejected') ||
+                                 error.message?.includes('cancelled') ||
+                                 error.message?.includes('Signature request was cancelled');
+      
+      if (!isUserCancellation) {
+        console.error('Error connecting wallet:', error);
+      }
+      
       setState({
         isConnected: false,
         address: null,
         isLoading: false,
         error: error.message || 'Failed to connect wallet',
       });
+      
+      // Re-throw the error so it can be handled by the caller (e.g., show toast)
+      throw error;
     } finally {
       setIsConnecting(false);
     }
@@ -150,14 +162,22 @@ export function useWallet() {
         nonce,
       });
     } catch (error: any) {
-      console.error('Error authenticating:', error);
+      // Don't log user cancellation as an error
+      const isUserCancellation = error.message?.includes('User rejected') || 
+                                 error.message?.includes('rejected') ||
+                                 error.message?.includes('cancelled') ||
+                                 error.code === 4001; // MetaMask user rejection code
+      
+      if (!isUserCancellation) {
+        console.error('Error authenticating:', error);
+      }
       
       // Provide clear error messages
       if (error.message?.includes('Invalid or expired nonce') || error.error === 'Invalid or expired nonce') {
         throw new Error('The authentication request expired. Please try connecting again.');
       }
       
-      if (error.message?.includes('User rejected') || error.message?.includes('rejected')) {
+      if (isUserCancellation) {
         throw new Error('Signature request was cancelled. Please try again.');
       }
       

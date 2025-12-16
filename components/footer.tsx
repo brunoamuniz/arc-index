@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Github, Twitter, MessageCircle } from "lucide-react"
+import { Github, Twitter, Linkedin } from "lucide-react"
 
 export function Footer() {
   return (
@@ -60,14 +60,29 @@ export function Footer() {
           <div>
             <h3 className="mb-4 text-sm font-semibold">Community</h3>
             <div className="flex gap-4">
-              <Link href="#" className="text-muted-foreground hover:text-foreground">
+              <Link 
+                href="https://x.com/0xbrunoamuniz" 
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-muted-foreground hover:text-foreground"
+              >
                 <Twitter className="h-5 w-5" />
               </Link>
-              <Link href="#" className="text-muted-foreground hover:text-foreground">
+              <Link 
+                href="https://github.com/brunoamuniz/arc-index" 
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-muted-foreground hover:text-foreground"
+              >
                 <Github className="h-5 w-5" />
               </Link>
-              <Link href="#" className="text-muted-foreground hover:text-foreground">
-                <MessageCircle className="h-5 w-5" />
+              <Link 
+                href="https://www.linkedin.com/in/brunoamuniz/" 
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Linkedin className="h-5 w-5" />
               </Link>
             </div>
           </div>

@@ -70,8 +70,13 @@ async function fetchAPI<T>(
     const errorDetails = data?.details || data?.detail || '';
     
     // Always log errors in development for better debugging
-    // But skip 401 errors (expected when not authenticated)
-    if (process.env.NODE_ENV === 'development' && response.status !== 401) {
+    // But skip expected errors (401, 404, 503)
+    const isExpectedError = response.status === 401 || 
+                           response.status === 404 || 
+                           response.status === 503 ||
+                           (response.status === 500 && errorMessage.includes('Database not configured'));
+    
+    if (process.env.NODE_ENV === 'development' && !isExpectedError) {
       const logData = {
         status: response.status,
         statusText: response.statusText,
@@ -84,6 +89,12 @@ async function fetchAPI<T>(
         fullResponse: JSON.stringify(data, null, 2),
       };
       console.error('API Error Response:', logData);
+    } else if (isExpectedError && process.env.NODE_ENV === 'development') {
+      // Log expected errors as warnings instead
+      console.warn(`API ${response.status} (expected):`, {
+        url: endpoint,
+        error: errorMessage,
+      });
     }
     
     const error = new APIError(

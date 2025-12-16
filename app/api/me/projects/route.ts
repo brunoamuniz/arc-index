@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     });
 
     const normalizedWallet = normalizeWalletAddress(session.walletAddress);
-    
+
     let query = supabaseAdmin!
       .from('arcindex_projects')
       .select(`
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
       });
       throw error;
     }
-    
+
     if (!data) {
       console.warn('No data returned from query, but no error');
       return NextResponse.json({ projects: [] });
@@ -110,9 +110,9 @@ export async function GET(request: NextRequest) {
       }
       
       return {
-        ...p,
-        rating_agg: p.arcindex_ratings_agg?.[0] || null,
-        funding_agg: p.arcindex_funding_agg?.[0] || null,
+      ...p,
+      rating_agg: p.arcindex_ratings_agg?.[0] || null,
+      funding_agg: p.arcindex_funding_agg?.[0] || null,
         latest_submission,
       };
     }));
