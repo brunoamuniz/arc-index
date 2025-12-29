@@ -76,7 +76,7 @@ async function fetchAPI<T>(
                            response.status === 503 ||
                            (response.status === 500 && errorMessage.includes('Database not configured'));
     
-    if (process.env.NODE_ENV === 'development' && !isExpectedError) {
+    if (process.env.NODE_ENV === 'development') {
       const logData = {
         status: response.status,
         statusText: response.statusText,
@@ -88,13 +88,11 @@ async function fetchAPI<T>(
         details: errorDetails,
         fullResponse: JSON.stringify(data, null, 2),
       };
-      console.error('API Error Response:', logData);
-    } else if (isExpectedError && process.env.NODE_ENV === 'development') {
-      // Log expected errors as warnings instead
-      console.warn(`API ${response.status} (expected):`, {
-        url: endpoint,
-        error: errorMessage,
-      });
+      if (isExpectedError) {
+        console.warn(`API ${response.status} (expected):`, logData);
+      } else {
+        console.error('API Error Response:', logData);
+      }
     }
     
     const error = new APIError(
@@ -308,6 +306,16 @@ export const projectsAPI = {
   }> {
     return fetchAPI(`/projects/${id}/register-on-chain`, {
       method: 'POST',
+    });
+  },
+
+  async adminUpdate(id: string, data: UpdateProjectInput): Promise<{ 
+    project: Project;
+    message: string;
+  }> {
+    return fetchAPI(`/projects/${id}/admin-edit`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
     });
   },
 };

@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { myProjectsAPI, projectsAPI } from "@/lib/api/client"
+import { myProjectsAPI, projectsAPI, authAPI } from "@/lib/api/client"
 import type { ProjectWithAggregates } from "@/packages/shared"
 import { useToast } from "@/hooks/use-toast"
 import { useWallet } from "@/lib/wallet/hooks"
@@ -61,14 +61,41 @@ export default function MyProjectsPage() {
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [projectToDelete, setProjectToDelete] = useState<{ id: string; name: string } | null>(null)
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
   const { toast } = useToast()
   const { isConnected } = useWallet()
 
+  // Check authentication status
   useEffect(() => {
-    if (isConnected) {
-      loadProjects()
+    async function checkAuth() {
+      if (!isConnected) {
+        setIsAuthenticated(false)
+        return
+      }
+      
+      try {
+        await authAPI.getMe()
+        setIsAuthenticated(true)
+      } catch (error: any) {
+        setIsAuthenticated(false)
+      }
     }
-  }, [isConnected, selectedStatus])
+    
+    checkAuth()
+  }, [isConnected])
+
+  useEffect(() => {
+    if (isConnected && isAuthenticated) {
+      loadProjects()
+    } else if (isConnected && isAuthenticated === false) {
+      // User is connected but not authenticated
+      setIsLoading(false)
+      setProjects([])
+    } else if (!isConnected) {
+      setIsLoading(false)
+      setProjects([])
+    }
+  }, [isConnected, isAuthenticated, selectedStatus])
 
   async function loadProjects() {
     try {
@@ -79,6 +106,18 @@ export default function MyProjectsPage() {
       setProjects(response.projects)
     } catch (error: any) {
       console.error("Error loading projects:", error)
+      
+      // Handle authentication errors more gracefully
+      if (error?.status === 401) {
+        toast({
+          title: "Authentication required",
+          description: "Please connect your wallet and sign in to view your projects.",
+          variant: "destructive",
+        })
+        setProjects([]) // Clear projects on auth error
+        return
+      }
+      
       toast({
         title: "Error loading projects",
         description: error.message || "Failed to load your projects",
@@ -199,7 +238,27 @@ export default function MyProjectsPage() {
           </div>
 
           {/* Projects List */}
-          {isLoading ? (
+          {!isConnected ? (
+            <Card className="border-border/40 bg-card/50">
+              <CardContent className="flex flex-col items-center justify-center py-16">
+                <AlertCircle className="mb-4 h-12 w-12 text-muted-foreground" />
+                <h3 className="mb-2 text-lg font-semibold">Wallet not connected</h3>
+                <p className="mb-6 text-sm text-muted-foreground text-center">
+                  Please connect your wallet to view your projects
+                </p>
+              </CardContent>
+            </Card>
+          ) : isAuthenticated === false ? (
+            <Card className="border-border/40 bg-card/50">
+              <CardContent className="flex flex-col items-center justify-center py-16">
+                <AlertCircle className="mb-4 h-12 w-12 text-muted-foreground" />
+                <h3 className="mb-2 text-lg font-semibold">Authentication required</h3>
+                <p className="mb-6 text-sm text-muted-foreground text-center">
+                  Please sign in with your wallet to view your projects. Click "Connect Wallet" and sign the message when prompted.
+                </p>
+              </CardContent>
+            </Card>
+          ) : isLoading ? (
             <div className="text-center py-12">
               <p className="text-muted-foreground">Loading projects...</p>
             </div>

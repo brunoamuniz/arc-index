@@ -7,10 +7,11 @@ import { Badge } from "@/components/ui/badge"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
 import { reviewAPI, projectsAPI } from "@/lib/api/client"
+import { useUserRole } from "@/lib/auth/use-user-role"
 import type { Submission } from "@/packages/shared"
 import { useToast } from "@/hooks/use-toast"
 import { useWallet } from "@/lib/wallet/hooks"
-import { CheckCircle2, XCircle, Clock, ExternalLink } from "lucide-react"
+import { CheckCircle2, XCircle, Clock, ExternalLink, Edit } from "lucide-react"
 import Link from "next/link"
 import {
   Dialog,
@@ -20,8 +21,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 
 export default function ReviewPage() {
@@ -32,8 +33,25 @@ export default function ReviewPage() {
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
   const [rejectingSubmissionId, setRejectingSubmissionId] = useState<string | null>(null)
   const [rejectReasonText, setRejectReasonText] = useState("")
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    description: '',
+    full_description: '',
+    category: '',
+    website_url: '',
+    x_url: '',
+    github_url: '',
+    linkedin_url: '',
+    discord_url: '',
+    discord_username: '',
+  })
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const { toast } = useToast()
   const { isConnected, address } = useWallet()
+  const { isCuratorOrAdmin } = useUserRole()
 
   useEffect(() => {
     if (isConnected) {
@@ -231,6 +249,204 @@ export default function ReviewPage() {
     }
   }
 
+  // Validate URL fields
+  function validateUrl(url: string): string | null {
+    if (!url || url.trim() === '') return null;
+    const trimmed = url.trim();
+    try {
+      new URL(trimmed);
+      return trimmed;
+    } catch {
+      return null;
+    }
+  }
+
+  // Validate form before submission
+  function validateForm(): { isValid: boolean; errors: Record<string, string> } {
+    const errors: Record<string, string> = {};
+
+    if (!editFormData.name.trim()) {
+      errors.name = 'Project name is required';
+    }
+    if (!editFormData.description.trim()) {
+      errors.description = 'Short description is required';
+    }
+    if (!editFormData.category.trim()) {
+      errors.category = 'Category is required';
+    }
+    if (!editFormData.website_url.trim()) {
+      errors.website_url = 'Website URL is required';
+    } else {
+      const validUrl = validateUrl(editFormData.website_url);
+      if (!validUrl) {
+        errors.website_url = 'Please enter a valid website URL (e.g., https://example.com)';
+      }
+    }
+
+    if (editFormData.x_url.trim()) {
+      const validUrl = validateUrl(editFormData.x_url);
+      if (!validUrl) {
+        errors.x_url = 'Please enter a valid Twitter URL (e.g., https://x.com/username)';
+      }
+    }
+    if (editFormData.github_url.trim()) {
+      const validUrl = validateUrl(editFormData.github_url);
+      if (!validUrl) {
+        errors.github_url = 'Please enter a valid GitHub URL (e.g., https://github.com/username)';
+      }
+    }
+    if (editFormData.linkedin_url.trim()) {
+      const validUrl = validateUrl(editFormData.linkedin_url);
+      if (!validUrl) {
+        errors.linkedin_url = 'Please enter a valid LinkedIn URL (e.g., https://linkedin.com/company/name)';
+      }
+    }
+    if (editFormData.discord_url.trim()) {
+      const validUrl = validateUrl(editFormData.discord_url);
+      if (!validUrl) {
+        errors.discord_url = 'Please enter a valid Discord URL (e.g., https://discord.gg/invite)';
+      }
+    }
+
+    setValidationErrors(errors);
+    return { isValid: Object.keys(errors).length === 0, errors };
+  }
+
+  function openEditDialog(projectId: string, project: any) {
+    setEditingProjectId(projectId)
+    setEditFormData({
+      name: project.name || '',
+      description: project.description || '',
+      full_description: project.full_description || '',
+      category: project.category || '',
+      website_url: project.website_url || '',
+      x_url: project.x_url || '',
+      github_url: project.github_url || '',
+      linkedin_url: project.linkedin_url || '',
+      discord_url: project.discord_url || '',
+      discord_username: project.discord_username || '',
+    })
+    setValidationErrors({}) // Clear validation errors
+    setEditDialogOpen(true)
+  }
+
+  async function handleAdminEdit() {
+    if (!editingProjectId) return
+
+    // Validate form before submitting
+    const validation = validateForm();
+    if (!validation.isValid) {
+      // Get list of fields with errors from the validation result
+      const errorFields = Object.keys(validation.errors);
+      const errorMessages = errorFields.map(field => {
+        const fieldName = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        return `${fieldName}: ${validation.errors[field]}`;
+      });
+      
+      toast({
+        title: "Validation error",
+        description: errorMessages.length > 0 
+          ? errorMessages.join('\n')
+          : "Please fix the errors in the form before saving",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setIsSaving(true)
+      
+      // Normalize empty strings to null for optional fields
+      const normalizeUrl = (url: string) => {
+        const trimmed = url.trim();
+        if (trimmed === '') return null;
+        try {
+          new URL(trimmed);
+          return trimmed;
+        } catch {
+          return null;
+        }
+      }
+      
+      // Prepare update data - include all fields that are provided
+      const updateData: Record<string, string | null> = {}
+      if (editFormData.name) updateData.name = editFormData.name
+      if (editFormData.description) updateData.description = editFormData.description
+      if (editFormData.full_description !== undefined) {
+        updateData.full_description = normalizeUrl(editFormData.full_description)
+      }
+      if (editFormData.category) updateData.category = editFormData.category
+      if (editFormData.website_url !== undefined) {
+        updateData.website_url = normalizeUrl(editFormData.website_url)
+      }
+      if (editFormData.x_url !== undefined) {
+        updateData.x_url = normalizeUrl(editFormData.x_url)
+      }
+      if (editFormData.github_url !== undefined) {
+        updateData.github_url = normalizeUrl(editFormData.github_url)
+      }
+      if (editFormData.linkedin_url !== undefined) {
+        updateData.linkedin_url = normalizeUrl(editFormData.linkedin_url)
+      }
+      if (editFormData.discord_url !== undefined) {
+        updateData.discord_url = normalizeUrl(editFormData.discord_url)
+      }
+      // discord_username is not a URL, just normalize empty strings to null
+      if (editFormData.discord_username !== undefined) {
+        const trimmed = editFormData.discord_username.trim()
+        updateData.discord_username = trimmed === '' ? null : trimmed
+      }
+
+      await projectsAPI.adminUpdate(editingProjectId, updateData)
+      
+      toast({
+        title: "Project updated",
+        description: "The project has been updated successfully",
+      })
+      
+      setEditDialogOpen(false)
+      setEditingProjectId(null)
+      setValidationErrors({}) // Clear validation errors on success
+      loadSubmissions() // Reload to show updated data
+    } catch (error: any) {
+      console.error("Error updating project:", error)
+      
+      // Check if it's a validation error from the backend
+      if (error?.responseData?.details && Array.isArray(error.responseData.details)) {
+        const backendErrors: Record<string, string> = {};
+        error.responseData.details.forEach((err: any) => {
+          if (err.path && err.path.length > 0) {
+            backendErrors[err.path[0]] = err.message || 'Invalid value';
+          }
+        });
+        setValidationErrors(backendErrors);
+        
+        // Show specific error messages
+        const errorFields = Object.keys(backendErrors);
+        const errorMessages = errorFields.map(field => {
+          const fieldName = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+          return `${fieldName}: ${backendErrors[field]}`;
+        });
+        
+        toast({
+          title: "Validation error",
+          description: errorMessages.length > 0 
+            ? errorMessages.join('\n')
+            : "Please check the form for errors",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Error updating project",
+          description: error.message || "Failed to update project",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   if (!isConnected) {
     return (
       <div className="min-h-screen">
@@ -365,6 +581,17 @@ export default function ReviewPage() {
                             View Project
                           </Link>
                         </Button>
+                        {isCuratorOrAdmin && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openEditDialog(project.id, project)}
+                            className="gap-2"
+                          >
+                            <Edit className="h-4 w-4" />
+                            Edit
+                          </Button>
+                        )}
                         {submission.status === 'Submitted' && (
                           <>
                             <Button
@@ -439,6 +666,190 @@ export default function ReviewPage() {
               disabled={!rejectReasonText.trim()}
             >
               Reject Project
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Edit Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Project (Admin)</DialogTitle>
+            <DialogDescription>
+              Make changes to the project details. All changes will be saved immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Project Name *</Label>
+              <Input
+                id="edit-name"
+                value={editFormData.name}
+                onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                placeholder="Project name"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">Short Description *</Label>
+              <Textarea
+                id="edit-description"
+                value={editFormData.description}
+                onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
+                placeholder="Short description (max 400 characters)"
+                rows={3}
+                maxLength={400}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-full-description">Full Description</Label>
+              <Textarea
+                id="edit-full-description"
+                value={editFormData.full_description}
+                onChange={(e) => setEditFormData({ ...editFormData, full_description: e.target.value })}
+                placeholder="Full description (max 5000 characters)"
+                rows={6}
+                maxLength={5000}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-category">Category *</Label>
+              <Input
+                id="edit-category"
+                value={editFormData.category}
+                onChange={(e) => setEditFormData({ ...editFormData, category: e.target.value })}
+                placeholder="Category"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-website">Website URL *</Label>
+              <Input
+                id="edit-website"
+                type="url"
+                value={editFormData.website_url}
+                onChange={(e) => {
+                  setEditFormData({ ...editFormData, website_url: e.target.value });
+                  if (validationErrors.website_url) {
+                    setValidationErrors({ ...validationErrors, website_url: '' });
+                  }
+                }}
+                placeholder="https://example.com"
+                className={validationErrors.website_url ? "border-destructive" : ""}
+              />
+              {validationErrors.website_url && (
+                <p className="text-sm text-destructive">{validationErrors.website_url}</p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-x">Twitter URL</Label>
+                <Input
+                  id="edit-x"
+                  type="url"
+                  value={editFormData.x_url}
+                  onChange={(e) => {
+                    setEditFormData({ ...editFormData, x_url: e.target.value });
+                    if (validationErrors.x_url) {
+                      setValidationErrors({ ...validationErrors, x_url: '' });
+                    }
+                  }}
+                  placeholder="https://x.com/username"
+                  className={validationErrors.x_url ? "border-destructive" : ""}
+                />
+                {validationErrors.x_url && (
+                  <p className="text-sm text-destructive">{validationErrors.x_url}</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-github">GitHub URL</Label>
+                <Input
+                  id="edit-github"
+                  type="url"
+                  value={editFormData.github_url}
+                  onChange={(e) => {
+                    setEditFormData({ ...editFormData, github_url: e.target.value });
+                    if (validationErrors.github_url) {
+                      setValidationErrors({ ...validationErrors, github_url: '' });
+                    }
+                  }}
+                  placeholder="https://github.com/username"
+                  className={validationErrors.github_url ? "border-destructive" : ""}
+                />
+                {validationErrors.github_url && (
+                  <p className="text-sm text-destructive">{validationErrors.github_url}</p>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-linkedin">LinkedIn URL</Label>
+                <Input
+                  id="edit-linkedin"
+                  type="url"
+                  value={editFormData.linkedin_url}
+                  onChange={(e) => {
+                    setEditFormData({ ...editFormData, linkedin_url: e.target.value });
+                    if (validationErrors.linkedin_url) {
+                      setValidationErrors({ ...validationErrors, linkedin_url: '' });
+                    }
+                  }}
+                  placeholder="https://linkedin.com/company/name"
+                  className={validationErrors.linkedin_url ? "border-destructive" : ""}
+                />
+                {validationErrors.linkedin_url && (
+                  <p className="text-sm text-destructive">{validationErrors.linkedin_url}</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-discord-url">Discord URL</Label>
+                <Input
+                  id="edit-discord-url"
+                  type="url"
+                  value={editFormData.discord_url}
+                  onChange={(e) => {
+                    setEditFormData({ ...editFormData, discord_url: e.target.value });
+                    if (validationErrors.discord_url) {
+                      setValidationErrors({ ...validationErrors, discord_url: '' });
+                    }
+                  }}
+                  placeholder="https://discord.gg/invite"
+                  className={validationErrors.discord_url ? "border-destructive" : ""}
+                />
+                {validationErrors.discord_url && (
+                  <p className="text-sm text-destructive">{validationErrors.discord_url}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Leave empty to remove. Must be a valid URL (e.g., https://discord.gg/invite)
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-discord-username">Discord Username</Label>
+              <Input
+                id="edit-discord-username"
+                value={editFormData.discord_username}
+                onChange={(e) => setEditFormData({ ...editFormData, discord_username: e.target.value })}
+                placeholder="username#1234"
+                maxLength={100}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEditDialogOpen(false)
+                setEditingProjectId(null)
+              }}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAdminEdit}
+              disabled={isSaving || !editFormData.name || !editFormData.description || !editFormData.category || !editFormData.website_url}
+            >
+              {isSaving ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
