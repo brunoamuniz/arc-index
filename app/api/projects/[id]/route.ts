@@ -24,7 +24,7 @@ const createProjectSchema = z.object({
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   if (!isSupabaseConfigured() || !supabaseAdmin) {
     return NextResponse.json(
@@ -35,8 +35,7 @@ export async function GET(
 
   try {
     // Extract project ID from params
-    const resolvedParams = await Promise.resolve(params);
-    const projectId = resolvedParams.id;
+    const { id: projectId } = await params;
     
     if (!projectId) {
       return NextResponse.json(
@@ -84,7 +83,7 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   if (!isSupabaseConfigured() || !supabaseAdmin) {
     return NextResponse.json(
@@ -96,10 +95,9 @@ export async function PUT(
   try {
     const session = await requireAuth();
     const body = await request.json();
-    
+
     // Extract project ID from params
-    const resolvedParams = await Promise.resolve(params);
-    const projectId = resolvedParams.id;
+    const { id: projectId } = await params;
     
     if (!projectId) {
       return NextResponse.json(
@@ -192,7 +190,7 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   if (!isSupabaseConfigured() || !supabaseAdmin) {
     return NextResponse.json(
@@ -203,10 +201,9 @@ export async function DELETE(
 
   try {
     const session = await requireAuth();
-    
+
     // Extract project ID from params
-    const resolvedParams = await Promise.resolve(params);
-    const projectId = resolvedParams.id;
+    const { id: projectId } = await params;
     
     if (!projectId) {
       return NextResponse.json(

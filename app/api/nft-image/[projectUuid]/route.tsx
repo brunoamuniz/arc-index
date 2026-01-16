@@ -13,17 +13,18 @@ export const contentType = 'image/png'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { projectUuid: string } }
+  { params }: { params: Promise<{ projectUuid: string }> }
 ) {
   if (!isSupabaseConfigured() || !supabaseAdmin) {
     return new Response('Database not configured', { status: 503 })
   }
 
   try {
+    const { projectUuid } = await params;
     const { data: project, error } = await supabaseAdmin!
       .from('arcindex_projects')
       .select('*')
-      .eq('id', params.projectUuid)
+      .eq('id', projectUuid)
       .single()
 
     if (error || !project) {

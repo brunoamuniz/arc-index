@@ -22,7 +22,7 @@ async function main() {
 
   // Get the contract instance
   const ProjectRegistry = await ethers.getContractFactory("ProjectRegistry");
-  const projectRegistry = ProjectRegistry.attach(projectRegistryAddress);
+  const projectRegistry = ProjectRegistry.attach(projectRegistryAddress) as any;
 
   // Check if the function exists (will fail if contract doesn't have it)
   try {
@@ -31,7 +31,7 @@ async function main() {
     console.log("Transaction hash:", tx.hash);
     await tx.wait();
     console.log("✅ ApprovalNFT address set successfully!");
-    
+
     // Verify
     const setAddress = await projectRegistry.approvalNFT();
     console.log("Verified ApprovalNFT address:", setAddress);

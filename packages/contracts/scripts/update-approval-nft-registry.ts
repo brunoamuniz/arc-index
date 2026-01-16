@@ -22,7 +22,7 @@ async function main() {
 
   // Get the ApprovalNFT contract instance
   const ApprovalNFT = await ethers.getContractFactory("ApprovalNFT");
-  const approvalNFT = ApprovalNFT.attach(approvalNFTAddress);
+  const approvalNFT = ApprovalNFT.attach(approvalNFTAddress) as any;
 
   // Check current registry address
   try {

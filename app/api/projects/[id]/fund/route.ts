@@ -23,7 +23,7 @@ const erc20Abi = parseAbi([
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   if (!isSupabaseConfigured() || !supabaseAdmin) {
     return NextResponse.json(
@@ -40,6 +40,7 @@ export async function POST(
   }
 
   try {
+    const { id } = await params;
     const session = await requireAuth();
     const body = await request.json();
     const { amount, txHash } = body;
@@ -55,7 +56,7 @@ export async function POST(
     const { data: project, error: projectError } = await supabaseAdmin!
       .from('arcindex_projects')
       .select('project_id, status, owner_wallet')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (projectError || !project) {
@@ -95,7 +96,7 @@ export async function POST(
       const { error: fundingError } = await supabaseAdmin!
         .from('arcindex_fundings')
         .insert({
-          project_id: params.id,
+          project_id: id,
           funder: normalizeWalletAddress(session.walletAddress),
           amount_usdc: amountWei.toString(),
           tx_hash: txHash,
