@@ -132,3 +132,37 @@ export interface RejectSubmissionInput {
   reasonText: string;
 }
 
+// Arc Index V2 Contract Types
+
+export enum OnChainProjectStatus {
+  None = 0,
+  Pending = 1,
+  Approved = 2,
+  Rejected = 3,
+}
+
+export interface OnChainProject {
+  owner: string;
+  status: OnChainProjectStatus;
+  metadataURI: string;
+  submittedAt: bigint;
+  approvedAt: bigint;
+  approvedBy: string;
+  certificateTokenId: bigint;
+  ratingCount: number;
+  ratingSum: number;
+  totalDonatedUSDC6: bigint;
+}
+
+export interface TransactionData {
+  to: string;
+  data: string;
+  chainId: number;
+}
+
+export interface ContractAddresses {
+  registry: string;
+  certificateNFT: string;
+  usdc: string;
+}
+

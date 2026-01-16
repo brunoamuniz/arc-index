@@ -1,20 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
-import { createPublicClient, http, parseAbi, encodeFunctionData, type Address } from 'viem';
+import { createPublicClient, http } from 'viem';
 import { normalizeWalletAddress } from '@/lib/supabase/auth';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server';
-
-const RPC_URL = process.env.RPC_URL || process.env.ARC_TESTNET_RPC_URL || process.env.NEXT_PUBLIC_ARC_TESTNET_RPC_URL!;
-const CHAIN_ID = parseInt(process.env.CHAIN_ID || '5042002', 10);
-const RATINGS_ADDRESS = process.env.RATINGS_ADDRESS as Address;
-
-const ratingsAbi = parseAbi([
-  'function rate(uint256 projectId, uint8 stars) external',
-  'function getRating(uint256 projectId, address rater) external view returns (uint8)',
-  'function getAverageRating(uint256 projectId) external view returns (uint256)',
-  'function getTotalRatings(uint256 projectId) external view returns (uint256)',
-  'event Rated(uint256 indexed projectId, address indexed rater, uint8 stars)',
-]);
+import {
+  encodeRateProject,
+  readProject,
+  areContractsConfigured,
+  getChainConfig,
+  ProjectStatus,
+} from '@/lib/contracts';
 
 export async function POST(
   request: NextRequest,
@@ -27,9 +22,9 @@ export async function POST(
     );
   }
 
-  if (!RATINGS_ADDRESS || !RPC_URL) {
+  if (!areContractsConfigured()) {
     return NextResponse.json(
-      { error: 'Ratings contract not configured. Please deploy contracts first.' },
+      { error: 'Registry contract not configured. Please deploy contracts first.' },
       { status: 503 }
     );
   }
@@ -81,8 +76,9 @@ export async function POST(
     // If txHash provided, verify transaction and update database
     if (txHash) {
       try {
+        const { rpcUrl } = getChainConfig();
         const publicClient = createPublicClient({
-          transport: http(RPC_URL),
+          transport: http(rpcUrl),
         });
 
         // Wait for transaction confirmation
@@ -98,10 +94,10 @@ export async function POST(
 
         if (!receipt.status || receipt.status === 'reverted') {
           return NextResponse.json(
-            { 
+            {
               error: 'Transaction failed or was reverted',
               details: `Transaction status: ${receipt.status}. Check the transaction on the blockchain explorer: https://testnet.arcscan.app/tx/${txHash}`,
-              txHash 
+              txHash
             },
             { status: 400 }
           );
@@ -133,10 +129,10 @@ export async function POST(
       } catch (txError: any) {
         console.error('Error verifying transaction:', txError);
         return NextResponse.json(
-          { 
+          {
             error: 'Failed to verify transaction',
             details: txError.message || 'Could not verify transaction on blockchain',
-            txHash 
+            txHash
           },
           { status: 500 }
         );
@@ -144,42 +140,51 @@ export async function POST(
     }
 
     // Validate project_id exists - projects must be registered on-chain before they can be rated
-    // The project_id is set when the project is created on-chain (via createProject) and then
-    // approved on-chain. If project_id is null, it means the project hasn't been created on-chain yet.
     if (!project.project_id) {
       return NextResponse.json(
-        { 
+        {
           error: 'Project not registered on-chain',
-          details: 'This project has been approved in the database but has not been created on the blockchain yet. Projects must be created on-chain before they can be rated. Please contact the project owner or a curator to complete the on-chain registration process.',
+          details: 'This project has been approved in the database but has not been created on the blockchain yet. Projects must be submitted on-chain before they can be rated.',
           code: 'PROJECT_NOT_ON_CHAIN',
         },
         { status: 400 }
       );
     }
 
+    // Verify project is approved on-chain (only approved projects can be rated)
+    try {
+      const onChainProject = await readProject(BigInt(project.project_id));
+      if (onChainProject && onChainProject.status !== ProjectStatus.Approved) {
+        return NextResponse.json(
+          {
+            error: 'Project is not approved on-chain',
+            details: 'Only projects that have been approved on-chain can be rated.',
+            code: 'PROJECT_NOT_APPROVED_ON_CHAIN',
+          },
+          { status: 400 }
+        );
+      }
+    } catch (error) {
+      console.error('Error checking project status on-chain:', error);
+      // Continue anyway, let the contract revert if needed
+    }
+
     // Return transaction data for client to sign
-    const data = encodeFunctionData({
-      abi: ratingsAbi,
-      functionName: 'rate',
-      args: [BigInt(project.project_id), stars],
-    });
+    // Using the new ArcIndexRegistry contract
+    const txData = encodeRateProject(BigInt(project.project_id), stars);
 
     return NextResponse.json({
-      txData: {
-        to: RATINGS_ADDRESS,
-        data,
-        chainId: CHAIN_ID,
-      },
+      txData,
     });
   } catch (error: any) {
     console.error('Error rating project:', error);
-    
+
     // Return more detailed error information
     const errorMessage = error?.message || 'Failed to rate project';
     const errorDetails = error?.details || error?.stack || '';
-    
+
     return NextResponse.json(
-      { 
+      {
         error: errorMessage,
         details: errorDetails,
         ...(error?.status && { status: error.status }),
@@ -188,4 +193,3 @@ export async function POST(
     );
   }
 }
-

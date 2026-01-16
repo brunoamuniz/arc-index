@@ -1,25 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
-import { createPublicClient, http, parseAbi, encodeFunctionData, type Address, parseUnits } from 'viem';
+import { createPublicClient, http, parseUnits, type Address } from 'viem';
 import { normalizeWalletAddress } from '@/lib/supabase/auth';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server';
-
-const RPC_URL = process.env.RPC_URL || process.env.ARC_TESTNET_RPC_URL || process.env.NEXT_PUBLIC_ARC_TESTNET_RPC_URL!;
-const CHAIN_ID = parseInt(process.env.CHAIN_ID || '5042002', 10);
-const FUNDING_ADDRESS = process.env.FUNDING_ADDRESS as Address;
-const USDC_ADDRESS = process.env.USDC_ADDRESS as Address;
-
-const fundingAbi = parseAbi([
-  'function fund(uint256 projectId, uint256 amount) external',
-  'function getTotalFunding(uint256 projectId) external view returns (uint256)',
-  'function getFundingCount(uint256 projectId) external view returns (uint256)',
-  'event Funded(uint256 indexed projectId, address indexed funder, uint256 amount)',
-]);
-
-const erc20Abi = parseAbi([
-  'function approve(address spender, uint256 amount) external returns (bool)',
-  'function allowance(address owner, address spender) external view returns (uint256)',
-]);
+import {
+  encodeDonateToProject,
+  encodeUSDCApproval,
+  checkUSDCAllowance,
+  readProject,
+  areContractsConfigured,
+  getChainConfig,
+  getContractAddresses,
+  ProjectStatus,
+} from '@/lib/contracts';
 
 export async function POST(
   request: NextRequest,
@@ -32,9 +25,9 @@ export async function POST(
     );
   }
 
-  if (!FUNDING_ADDRESS || !USDC_ADDRESS || !RPC_URL) {
+  if (!areContractsConfigured()) {
     return NextResponse.json(
-      { error: 'Funding contract not configured. Please deploy contracts first.' },
+      { error: 'Registry contract not configured. Please deploy contracts first.' },
       { status: 503 }
     );
   }
@@ -68,15 +61,16 @@ export async function POST(
 
     if (project.status !== 'Approved') {
       return NextResponse.json(
-        { error: 'Only approved projects can receive funding' },
+        { error: 'Only approved projects can receive donations' },
         { status: 400 }
       );
     }
 
     // If txHash provided, verify transaction and update database
     if (txHash) {
+      const { rpcUrl } = getChainConfig();
       const publicClient = createPublicClient({
-        transport: http(RPC_URL),
+        transport: http(rpcUrl),
       });
 
       // Wait for transaction confirmation
@@ -116,45 +110,59 @@ export async function POST(
       });
     }
 
-    // Return transaction data for client to sign
-    // First, check if approval is needed
-    const publicClient = createPublicClient({
-      transport: http(RPC_URL),
-    });
+    // Validate project_id exists
+    if (!project.project_id) {
+      return NextResponse.json(
+        {
+          error: 'Project not registered on-chain',
+          details: 'This project must be registered on-chain before it can receive donations.',
+          code: 'PROJECT_NOT_ON_CHAIN',
+        },
+        { status: 400 }
+      );
+    }
 
+    // Verify project is approved on-chain (only approved projects can receive donations)
+    try {
+      const onChainProject = await readProject(BigInt(project.project_id));
+      if (onChainProject && onChainProject.status !== ProjectStatus.Approved) {
+        return NextResponse.json(
+          {
+            error: 'Project is not approved on-chain',
+            details: 'Only projects that have been approved on-chain can receive donations.',
+            code: 'PROJECT_NOT_APPROVED_ON_CHAIN',
+          },
+          { status: 400 }
+        );
+      }
+    } catch (error) {
+      console.error('Error checking project status on-chain:', error);
+      // Continue anyway, let the contract revert if needed
+    }
+
+    // Check if USDC approval is needed
     const amountWei = parseUnits(amount, 6); // USDC has 6 decimals
-    const allowance = await publicClient.readContract({
-      address: USDC_ADDRESS,
-      abi: erc20Abi,
-      functionName: 'allowance',
-      args: [session.walletAddress as Address, FUNDING_ADDRESS],
-    });
-
+    const allowance = await checkUSDCAllowance(session.walletAddress as Address);
     const needsApproval = allowance < amountWei;
 
-    const fundData = encodeFunctionData({
-      abi: fundingAbi,
-      functionName: 'fund',
-      args: [BigInt(project.project_id || 0), amountWei],
-    });
+    // Prepare donation transaction data
+    const { to, data, chainId } = encodeDonateToProject(BigInt(project.project_id), amount);
 
-    const approvalData = needsApproval ? encodeFunctionData({
-      abi: erc20Abi,
-      functionName: 'approve',
-      args: [FUNDING_ADDRESS, amountWei],
-    }) : undefined;
+    // Prepare approval transaction if needed
+    const approvalTxData = needsApproval ? encodeUSDCApproval(amountWei) : undefined;
+    const { usdc } = getContractAddresses();
 
     return NextResponse.json({
       txData: {
-        to: FUNDING_ADDRESS,
-        data: fundData,
-        chainId: CHAIN_ID,
+        to,
+        data,
+        chainId,
       },
       approvalNeeded: needsApproval,
       approvalTxData: needsApproval ? {
-        to: USDC_ADDRESS,
-        data: approvalData!,
-        chainId: CHAIN_ID,
+        to: usdc,
+        data: approvalTxData?.data,
+        chainId: approvalTxData?.chainId,
       } : undefined,
     });
   } catch (error) {
@@ -165,4 +173,3 @@ export async function POST(
     );
   }
 }
-

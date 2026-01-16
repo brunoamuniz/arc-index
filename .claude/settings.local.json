@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install)",
+      "Bash(npm run dev)",
+      "Bash(npm run db:push:*)",
+      "Bash(npx prisma db push:*)",
+      "Bash(npx prisma db pull:*)",
+      "Bash(PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=\"drop it and create again\" npx prisma db push:*)",
+      "Bash(claude mcp add playwright npx @playwright/mcp@latest)",
+      "Bash(npm install:*)",
+      "Bash(npx playwright:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs:*)",
+      "Bash(pkill:*)",
+      "Bash(curl:*)",
+      "Bash(npx tsx:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(ls:*)",
+      "Bash(git rm:*)",
+      "Bash(npx prisma migrate dev:*)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_fill_form",
+      "mcp__playwright__browser_wait_for",
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_evaluate",
+      "mcp__playwright__browser_close",
+      "Skill(frontend-design)",
+      "Bash(npm run build:*)",
+      "Bash(npx next:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npx tsc:*)",
+      "WebSearch"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true
+  }
+}

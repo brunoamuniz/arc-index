@@ -1,0 +1,470 @@
+// ABI Exports for Arc Index Contracts
+// These are extracted from compiled artifacts for use in frontend
+
+export const ArcIndexRegistryABI = [
+  {
+    inputs: [
+      { name: "_certificateNFT", type: "address" },
+      { name: "_treasury", type: "address" },
+      { name: "_feeBps", type: "uint16" },
+    ],
+    stateMutability: "nonpayable",
+    type: "constructor",
+  },
+  { inputs: [], name: "InvalidAddress", type: "error" },
+  { inputs: [], name: "InvalidAmount", type: "error" },
+  { inputs: [], name: "InvalidFeeBps", type: "error" },
+  { inputs: [], name: "InvalidRating", type: "error" },
+  { inputs: [], name: "InvalidStatus", type: "error" },
+  { inputs: [], name: "NotProjectOwner", type: "error" },
+  { inputs: [], name: "ProjectNotFound", type: "error" },
+  {
+    anonymous: false,
+    inputs: [{ indexed: true, name: "curator", type: "address" }],
+    name: "CuratorAdded",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [{ indexed: true, name: "curator", type: "address" }],
+    name: "CuratorRemoved",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "projectId", type: "uint256" },
+      { indexed: true, name: "curator", type: "address" },
+      { indexed: false, name: "certificateTokenId", type: "uint256" },
+    ],
+    name: "ProjectApproved",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "projectId", type: "uint256" },
+      { indexed: true, name: "donor", type: "address" },
+      { indexed: false, name: "amount", type: "uint256" },
+      { indexed: false, name: "fee", type: "uint256" },
+    ],
+    name: "ProjectDonated",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "projectId", type: "uint256" },
+      { indexed: false, name: "metadataURI", type: "string" },
+    ],
+    name: "ProjectMetadataUpdated",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "projectId", type: "uint256" },
+      { indexed: true, name: "rater", type: "address" },
+      { indexed: false, name: "stars", type: "uint8" },
+      { indexed: false, name: "newRatingCount", type: "uint32" },
+      { indexed: false, name: "newRatingSum", type: "uint32" },
+    ],
+    name: "ProjectRated",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "projectId", type: "uint256" },
+      { indexed: true, name: "curator", type: "address" },
+      { indexed: false, name: "reason", type: "string" },
+    ],
+    name: "ProjectRejected",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "projectId", type: "uint256" },
+      { indexed: true, name: "owner", type: "address" },
+      { indexed: false, name: "metadataURI", type: "string" },
+    ],
+    name: "ProjectSubmitted",
+    type: "event",
+  },
+  {
+    inputs: [],
+    name: "CURATOR_ROLE",
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "DEFAULT_ADMIN_ROLE",
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "MAX_FEE_BPS",
+    outputs: [{ name: "", type: "uint16" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "USDC",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "curator", type: "address" }],
+    name: "addCurator",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "projectId", type: "uint256" }],
+    name: "approveProject",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "certificateNFT",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "projectId", type: "uint256" },
+      { name: "amount", type: "uint256" },
+    ],
+    name: "donateToProject",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "feeBps",
+    outputs: [{ name: "", type: "uint16" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "projectId", type: "uint256" }],
+    name: "getAverageRating",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "projectId", type: "uint256" }],
+    name: "getProject",
+    outputs: [
+      { name: "owner", type: "address" },
+      { name: "status", type: "uint8" },
+      { name: "metadataURI", type: "string" },
+      { name: "submittedAt", type: "uint64" },
+      { name: "approvedAt", type: "uint64" },
+      { name: "approvedBy", type: "address" },
+      { name: "certificateTokenId", type: "uint256" },
+      { name: "ratingCount", type: "uint32" },
+      { name: "ratingSum", type: "uint32" },
+      { name: "totalDonatedUSDC6", type: "uint256" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "role", type: "bytes32" },
+      { name: "account", type: "address" },
+    ],
+    name: "grantRole",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "user", type: "address" },
+      { name: "projectId", type: "uint256" },
+    ],
+    name: "getUserRating",
+    outputs: [{ name: "", type: "uint8" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "role", type: "bytes32" },
+      { name: "account", type: "address" },
+    ],
+    name: "hasRole",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "nextProjectId",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "pause",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "paused",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "projectId", type: "uint256" },
+      { name: "stars", type: "uint8" },
+    ],
+    name: "rateProject",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "projectId", type: "uint256" },
+      { name: "reason", type: "string" },
+    ],
+    name: "rejectProject",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "curator", type: "address" }],
+    name: "removeCurator",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "newFeeBps", type: "uint16" }],
+    name: "setFeeBps",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "newTreasury", type: "address" }],
+    name: "setTreasury",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "metadataURI", type: "string" }],
+    name: "submitProject",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "treasury",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "unpause",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "projectId", type: "uint256" },
+      { name: "metadataURI", type: "string" },
+    ],
+    name: "updateProjectMetadata",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+] as const;
+
+export const ArcIndexCertificateNFTABI = [
+  { inputs: [], stateMutability: "nonpayable", type: "constructor" },
+  { inputs: [{ name: "projectId", type: "uint256" }], name: "AlreadyMinted", type: "error" },
+  { inputs: [], name: "InvalidAddress", type: "error" },
+  { inputs: [], name: "SoulboundToken", type: "error" },
+  { inputs: [{ name: "tokenId", type: "uint256" }], name: "TokenNotFound", type: "error" },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "projectId", type: "uint256" },
+      { indexed: true, name: "tokenId", type: "uint256" },
+    ],
+    name: "CertificateBurned",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "projectId", type: "uint256" },
+      { indexed: true, name: "tokenId", type: "uint256" },
+      { indexed: true, name: "to", type: "address" },
+    ],
+    name: "CertificateMinted",
+    type: "event",
+  },
+  {
+    inputs: [],
+    name: "DEFAULT_ADMIN_ROLE",
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "MINTER_ROLE",
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    name: "burn",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    name: "getProjectIdForToken",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "projectId", type: "uint256" }],
+    name: "getTokenIdForProject",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "projectId", type: "uint256" },
+      { name: "uri", type: "string" },
+    ],
+    name: "mintCertificate",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "name",
+    outputs: [{ name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    name: "ownerOf",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "", type: "uint256" }],
+    name: "projectIdToTokenId",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "symbol",
+    outputs: [{ name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "", type: "uint256" }],
+    name: "tokenIdToProjectId",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    name: "tokenURI",
+    outputs: [{ name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+// ERC20 ABI for USDC interactions
+export const ERC20ABI = [
+  {
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    name: "approve",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+    ],
+    name: "allowance",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "account", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+// Project Status enum matching contract
+export enum ProjectStatus {
+  None = 0,
+  Pending = 1,
+  Approved = 2,
+  Rejected = 3,
+}
+
+// Contract addresses type
+export interface ArcIndexContractAddresses {
+  registry: `0x${string}`;
+  certificateNFT: `0x${string}`;
+  usdc: `0x${string}`;
+}

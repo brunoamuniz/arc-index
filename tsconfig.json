@@ -28,6 +28,9 @@
       ],
       "@/packages/shared": [
         "./packages/shared"
+      ],
+      "@arc-index/contracts/*": [
+        "./packages/contracts/*"
       ]
     }
   },
