@@ -170,3 +170,6 @@ DEBUG_ERROR.md
 FIX_CURATOR_ROLE.md
 SET_CURATOR_ROLE.md
 CHAIN_ID_UPDATE.md
+
+# Documentation folder - keep local but don't track in git
+docs/
