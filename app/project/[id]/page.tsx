@@ -89,6 +89,59 @@ export default function ProjectDetailsPage() {
 
   const CHAIN_ID = parseInt(process.env.NEXT_PUBLIC_CHAIN_ID || '5042002', 10)
 
+  // Helper function to ensure wallet is on the correct chain
+  const ensureCorrectChain = async () => {
+    if (typeof window === 'undefined' || !window.ethereum) {
+      throw new Error('MetaMask not found')
+    }
+
+    const currentChainId = await window.ethereum.request({ method: 'eth_chainId' })
+    const currentChainIdNumber = parseInt(currentChainId, 16)
+    
+    if (currentChainIdNumber !== CHAIN_ID) {
+      const rpcUrl = process.env.NEXT_PUBLIC_ARC_TESTNET_RPC_URL || 'https://rpc.testnet.arc.network'
+      
+      try {
+        // Try to switch to the chain
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: `0x${CHAIN_ID.toString(16)}` }],
+        })
+      } catch (switchError: any) {
+        // If the chain doesn't exist, add it
+        if (switchError.code === 4902 || switchError.code === -32603) {
+          try {
+            await window.ethereum.request({
+              method: 'wallet_addEthereumChain',
+              params: [{
+                chainId: `0x${CHAIN_ID.toString(16)}`,
+                chainName: 'Arc Network Testnet',
+                nativeCurrency: {
+                  name: 'ETH',
+                  symbol: 'ETH',
+                  decimals: 18,
+                },
+                rpcUrls: [rpcUrl],
+                blockExplorerUrls: ['https://testnet.arcscan.app'],
+              }],
+            })
+          } catch (addError: any) {
+            // User rejected adding the chain
+            if (addError.code === 4001) {
+              throw new Error('Please add Arc Network Testnet to your wallet to continue')
+            }
+            throw addError
+          }
+        } else if (switchError.code === 4001) {
+          // User rejected switching chains
+          throw new Error('Please switch to Arc Network Testnet to continue')
+        } else {
+          throw switchError
+        }
+      }
+    }
+  }
+
   useEffect(() => {
     loadProject()
   }, [projectId])
@@ -124,7 +177,13 @@ export default function ProjectDetailsPage() {
   async function loadProject() {
     try {
       setIsLoading(true)
+      // Add cache busting to ensure fresh data
       const response = await projectsAPI.get(projectId)
+      console.log('Project loaded:', {
+        id: response.project.id,
+        rating_agg: response.project.rating_agg,
+        funding_agg: response.project.funding_agg,
+      });
       setProject(response.project)
     } catch (error: any) {
       console.error("Error loading project:", error)
@@ -369,11 +428,6 @@ export default function ProjectDetailsPage() {
   }
 
   const handleDonate = async () => {
-    setFeatureNotSupportedDialogOpen(true)
-    return
-    
-    // Original code commented out - feature not supported yet
-    /*
     if (!donationAmount || Number.parseFloat(donationAmount) <= 0) {
       toast({
         title: "Invalid amount",
@@ -403,6 +457,9 @@ export default function ProjectDetailsPage() {
 
     try {
       setIsFunding(true)
+
+      // Ensure wallet is on the correct chain
+      await ensureCorrectChain()
 
       // Get transaction data from API
       const { txData, approvalNeeded, approvalTxData } = await projectsAPI.fund(projectId, donationAmount)
@@ -473,26 +530,48 @@ export default function ProjectDetailsPage() {
       })
 
       setDonationAmount("")
-      loadProject() // Reload to update funding stats
+      // Force reload with cache busting
+      setTimeout(async () => {
+        console.log('Reloading project after donation...');
+        await loadProject();
+        // Force a second reload after a bit more time to ensure aggregates are synced
+        setTimeout(() => {
+          console.log('Second reload to ensure aggregates are synced...');
+          loadProject();
+        }, 1000);
+      }, 500)
     } catch (error: any) {
       console.error("Error donating:", error)
+
+      let errorTitle = "Donation failed"
+      let errorMessage = error.message || "Failed to process donation"
+
+      // Check for specific error codes from API
+      if (error.code === 'UNAUTHORIZED' || error.status === 401) {
+        errorTitle = "Not signed in"
+        errorMessage = "Please connect your wallet and sign in to donate to projects."
+      } else if (error.code === 'PROJECT_NOT_ON_CHAIN' || error.error?.includes('not registered on-chain')) {
+        errorTitle = "Project not on blockchain yet"
+        errorMessage = "This project needs to be registered on the blockchain before it can receive donations. The project owner or a curator needs to complete the on-chain registration first."
+      } else if (error.code === 'PROJECT_NOT_APPROVED_ON_CHAIN') {
+        errorTitle = "Project not approved"
+        errorMessage = "This project is not approved on the blockchain and cannot receive donations yet."
+      } else if (error.message?.includes('User rejected') || error.message?.includes('user rejected')) {
+        errorTitle = "Transaction cancelled"
+        errorMessage = "You cancelled the transaction. Please try again."
+      }
+
       toast({
-        title: "Donation failed",
-        description: error.message || "Failed to process donation",
+        title: errorTitle,
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
       setIsFunding(false)
     }
-    */
   }
 
   const handleRate = async (stars: number) => {
-    setFeatureNotSupportedDialogOpen(true)
-    return
-    
-    // Original code commented out - feature not supported yet
-    /*
     if (!isConnected || !address) {
       toast({
         title: "Wallet not connected",
@@ -514,6 +593,9 @@ export default function ProjectDetailsPage() {
     try {
       setIsRating(true)
       setUserRating(stars)
+
+      // Ensure wallet is on the correct chain
+      await ensureCorrectChain()
 
       // Get transaction data from API
       const { txData } = await projectsAPI.rate(projectId, stars)
@@ -568,19 +650,35 @@ export default function ProjectDetailsPage() {
         description: `You rated this project ${stars} star${stars > 1 ? 's' : ''}`,
       })
 
-      loadProject() // Reload to update rating stats
+      // Force reload with cache busting
+      setTimeout(async () => {
+        console.log('Reloading project after rating...');
+        await loadProject();
+        // Force a second reload after a bit more time to ensure aggregates are synced
+        setTimeout(() => {
+          console.log('Second reload to ensure aggregates are synced...');
+          loadProject();
+        }, 1000);
+      }, 500)
     } catch (error: any) {
       console.error("Error rating:", error)
-      
+
       // Provide more specific error messages
       let errorMessage = error.message || "Failed to submit rating"
       let errorTitle = "Rating failed"
-      
-      if (error.status === 400) {
-        if (error.error?.includes('not registered on-chain') || error.details?.includes('not been registered')) {
-          errorTitle = "Project not ready"
-          errorMessage = error.details || "This project has been approved but hasn't been registered on-chain yet. Please wait for the on-chain registration to complete."
-        } else if (error.error?.includes('Transaction failed') || error.details?.includes('reverted')) {
+
+      // Check for specific error codes from API
+      if (error.code === 'UNAUTHORIZED' || error.status === 401) {
+        errorTitle = "Not signed in"
+        errorMessage = "Please connect your wallet and sign in to rate projects."
+      } else if (error.code === 'PROJECT_NOT_ON_CHAIN' || error.error?.includes('not registered on-chain') || error.details?.includes('not been registered')) {
+        errorTitle = "Project not on blockchain yet"
+        errorMessage = "This project needs to be registered on the blockchain before it can be rated. The project owner or a curator needs to complete the on-chain registration first."
+      } else if (error.code === 'PROJECT_NOT_APPROVED_ON_CHAIN' || error.error?.includes('not approved on-chain')) {
+        errorTitle = "Project not approved"
+        errorMessage = "This project is not approved on the blockchain and cannot be rated yet."
+      } else if (error.status === 400) {
+        if (error.error?.includes('Transaction failed') || error.details?.includes('reverted')) {
           errorTitle = "Transaction failed"
           errorMessage = error.details || error.error || errorMessage
         } else {
@@ -593,11 +691,11 @@ export default function ProjectDetailsPage() {
       } else if (error.message?.includes('reverted')) {
         errorTitle = "Transaction reverted"
         errorMessage = "The transaction was reverted on-chain. Please check the transaction details."
-      } else if (error.message?.includes('User rejected')) {
+      } else if (error.message?.includes('User rejected') || error.message?.includes('user rejected')) {
         errorTitle = "Transaction cancelled"
         errorMessage = "You cancelled the transaction. Please try again."
       }
-      
+
       toast({
         title: errorTitle,
         description: errorMessage,
@@ -607,14 +705,9 @@ export default function ProjectDetailsPage() {
     } finally {
       setIsRating(false)
     }
-    */
   }
 
   const handleRegisterOnChain = async () => {
-    setFeatureNotSupportedDialogOpen(true)
-    return
-    
-    /* Temporarily disabled - Feature Not Available
     if (!isConnected || !address) {
       toast({
         title: "Wallet not connected",
@@ -638,6 +731,13 @@ export default function ProjectDetailsPage() {
     try {
       setIsRegistering(true)
 
+      // Ensure wallet is on the correct chain
+      toast({
+        title: "Switching network...",
+        description: "Please approve the network switch to Arc Network if prompted",
+      })
+      await ensureCorrectChain()
+
       // Get transaction data from API
       const response = await projectsAPI.registerOnChain(projectId)
 
@@ -658,588 +758,126 @@ export default function ProjectDetailsPage() {
         transport: http(process.env.NEXT_PUBLIC_ARC_TESTNET_RPC_URL || 'https://rpc.testnet.arc.network'),
       })
 
-      // Step 1: Create project on-chain if needed
-      if (response.createTxData) {
-        toast({
-          title: "Creating project on-chain...",
-          description: "Please confirm the transaction to create the project",
-        })
-
-        const createHash = await walletClient.sendTransaction({
-          account: address as Address,
-          to: response.createTxData.to as Address,
-          data: response.createTxData.data as `0x${string}`,
-        })
-
-        const receipt = await publicClient.waitForTransactionReceipt({ hash: createHash })
-        
-        // Check if transaction was successful
-        if (receipt.status === 'reverted') {
-          throw new Error(`Project creation transaction failed. Transaction was reverted. Check: https://testnet.arcscan.app/tx/${createHash}`)
-        }
-        
-        console.log('Project creation receipt:', {
-          hash: receipt.transactionHash,
-          status: receipt.status,
-          blockNumber: receipt.blockNumber,
-        })
-
-        // Extract project_id from ProjectCreated event in the receipt
-        const projectRegistryAddress = process.env.NEXT_PUBLIC_PROJECT_REGISTRY_ADDRESS as Address
-        const projectCreatedEventAbi = parseAbi([
-          'event ProjectCreated(uint256 indexed projectId, address indexed owner, string metadataUri)',
-          'function nextProjectId() external view returns (uint256)',
-        ])
-
-        let onChainProjectId: bigint | null = null
-        
-        // Try to decode the event from logs
-        try {
-          const logs = receipt.logs
-          console.log('Total logs in receipt:', logs.length)
-          
-          // Filter logs by ProjectRegistry address
-          const projectRegistryLogs = logs.filter(log => 
-            log.address.toLowerCase() === projectRegistryAddress.toLowerCase()
-          )
-          console.log('ProjectRegistry logs:', projectRegistryLogs.length)
-          
-          for (const log of projectRegistryLogs) {
-            try {
-              const decoded = decodeEventLog({
-                abi: projectCreatedEventAbi,
-                data: log.data,
-                topics: log.topics,
-              })
-              
-              console.log('Decoded event:', decoded)
-              
-              if (decoded.eventName === 'ProjectCreated') {
-                onChainProjectId = decoded.args.projectId as bigint
-                console.log('✅ Extracted project_id from event:', onChainProjectId)
-                break
-              }
-            } catch (e) {
-              // Not the event we're looking for, continue
-              console.log('Event decode attempt failed (not ProjectCreated):', e)
-            }
-          }
-        } catch (e) {
-          console.error('Error decoding event:', e)
-        }
-
-        // Fallback: Read nextProjectId from contract and subtract 1
-        if (!onChainProjectId) {
-          console.log('Event decoding failed, trying fallback: reading nextProjectId from contract...')
-          try {
-            const nextProjectId = await publicClient.readContract({
-              address: projectRegistryAddress,
-              abi: projectCreatedEventAbi,
-              functionName: 'nextProjectId',
-            })
-            // The project_id is nextProjectId - 1 (since nextProjectId was incremented after creation)
-            onChainProjectId = (nextProjectId as bigint) - BigInt(1)
-            console.log('✅ Extracted project_id from nextProjectId:', onChainProjectId)
-          } catch (e) {
-            console.error('Fallback also failed:', e)
-            throw new Error(`Could not extract project_id from transaction. Transaction hash: ${receipt.transactionHash}. Please check the transaction on the explorer: https://testnet.arcscan.app/tx/${receipt.transactionHash}`)
-          }
-        }
-
-        const onChainProjectIdNumber = Number(onChainProjectId)
-        
-        toast({
-          title: "Project created on-chain!",
-          description: `Project ID: #${onChainProjectIdNumber}. Proceeding with approval...`,
-        })
-
-        // Update project_id in database directly (don't wait for indexer)
-        // Note: The update API might not support project_id, so we'll let the indexer handle it
-        // But we can continue with the on-chain operations using the extracted project_id
-
-        // Now proceed with approval and NFT minting
-        const metadataUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://arcindex.xyz'}/api/metadata/${project.id}`
-        const APPROVAL_NFT_ADDRESS = process.env.NEXT_PUBLIC_APPROVAL_NFT_ADDRESS as Address
-        
-        const projectRegistryAbi = parseAbi([
-          'function submit(uint256 projectId) external',
-          'function approve(uint256 projectId) external',
-          'function mintApprovalNFT(uint256 projectId, address to, string memory tokenURI) external returns (uint256)',
-          'function getProject(uint256 projectId) external view returns (address owner, uint8 status, string memory metadataUri)',
-        ])
-        
-        // Check current status on-chain and owner
-        let currentStatus: number
-        let onChainOwner: Address | null = null
-        try {
-          const [owner, status] = await publicClient.readContract({
-            address: projectRegistryAddress,
-            abi: projectRegistryAbi,
-            functionName: 'getProject',
-            args: [onChainProjectId],
-          })
-          currentStatus = Number(status)
-          onChainOwner = owner as Address
-          console.log('Project on-chain - Status:', currentStatus, 'Owner:', onChainOwner, 'Current user:', address)
-        } catch (e) {
-          console.error('Error checking project status:', e)
-          currentStatus = 0 // Draft
-        }
-        
-        // Step 2: Submit project on-chain if it's still Draft (status 0)
-        // Note: submit() requires onlyOwner modifier, so only the on-chain owner can submit
-        if (currentStatus === 0) {
-          // Check if current user is the on-chain owner
-          if (onChainOwner && onChainOwner.toLowerCase() !== address.toLowerCase()) {
-            throw new Error(`Cannot submit project. Only the on-chain owner (${onChainOwner}) can submit the project. The project was created by a different address. Please ask the owner to submit the project first, or recreate the project with your wallet.`)
-          }
-          
-          // Simulate the transaction first to catch errors early
-          let simulationError: string | null = null
-          try {
-            await publicClient.simulateContract({
-              address: projectRegistryAddress,
-              abi: projectRegistryAbi,
-              functionName: 'submit',
-              args: [onChainProjectId],
-              account: address as Address,
-            })
-          } catch (simError: any) {
-            simulationError = simError.message || simError.shortMessage || 'Unknown error'
-            console.error('Submit simulation error:', simError)
-            
-            // Provide specific error messages based on common revert reasons
-            if (simError.message?.includes('Not owner') || simError.shortMessage?.includes('Not owner')) {
-              throw new Error(`Cannot submit project. You are not the on-chain owner (${onChainOwner}). Only the address that created the project can submit it.`)
-            } else if (simError.message?.includes('Invalid status') || simError.shortMessage?.includes('Invalid status')) {
-              throw new Error(`Cannot submit project. Project status is not Draft or Rejected. Current status: ${currentStatus}.`)
-            } else {
-              throw new Error(`Cannot submit project. Simulation failed: ${simulationError}`)
-            }
-          }
-          
-          const submitData = encodeFunctionData({
-            abi: projectRegistryAbi,
-            functionName: 'submit',
-            args: [onChainProjectId],
-          })
-
-          toast({
-            title: "Submitting project on-chain...",
-            description: "Please confirm the submission transaction",
-          })
-
-          const submitHash = await walletClient.sendTransaction({
-            account: address as Address,
-            to: projectRegistryAddress,
-            data: submitData,
-          })
-
-          const submitReceipt = await publicClient.waitForTransactionReceipt({ hash: submitHash })
-          
-          console.log('Submit receipt:', {
-            hash: submitReceipt.transactionHash,
-            status: submitReceipt.status,
-            blockNumber: submitReceipt.blockNumber,
-            logs: submitReceipt.logs.length,
-          })
-          
-          // Check if transaction was successful
-          if (submitReceipt.status === 'reverted') {
-            // Try to decode revert reason if possible
-            let revertReason = ''
-            try {
-              // Check if it's a permission error
-              if (onChainOwner && onChainOwner.toLowerCase() !== address.toLowerCase()) {
-                revertReason = ` You are not the on-chain owner (${onChainOwner}). Only the owner can submit.`
-              } else {
-                revertReason = ' This might be because you are not the on-chain owner of the project, or the project status is not Draft/Rejected.'
-              }
-            } catch (e) {
-              // Ignore
-            }
-            throw new Error(`Submission transaction failed. Transaction was reverted.${revertReason} Check: https://testnet.arcscan.app/tx/${submitHash}`)
-          }
-          
-          toast({
-            title: "Project submitted on-chain!",
-            description: "Project status updated to Submitted. Proceeding with approval...",
-          })
-          
-          // Verify status was updated to Submitted (1)
-          try {
-            await new Promise(resolve => setTimeout(resolve, 2000)) // Wait a bit for state to update
-            const [ownerAfterSubmit, statusAfterSubmit] = await publicClient.readContract({
-              address: projectRegistryAddress,
-              abi: projectRegistryAbi,
-              functionName: 'getProject',
-              args: [onChainProjectId],
-            })
-            const newStatus = Number(statusAfterSubmit)
-            console.log('Status after submit:', newStatus)
-            
-            if (newStatus !== 1) {
-              throw new Error(`Project submission completed but status is still not "Submitted". Current status: ${newStatus}. Please try again.`)
-            }
-          } catch (verifyError: any) {
-            if (verifyError.message?.includes('status is still not')) {
-              throw verifyError
-            }
-            console.warn('Could not verify submit status, but continuing:', verifyError)
-          }
-        }
-        
-        // Step 3: Approve project on-chain (only if status is Submitted, skip if already Approved)
-        // Re-check status before approving
-        let statusBeforeApprove: number
-        try {
-          const [owner, status] = await publicClient.readContract({
-            address: projectRegistryAddress,
-            abi: projectRegistryAbi,
-            functionName: 'getProject',
-            args: [onChainProjectId],
-          })
-          statusBeforeApprove = Number(status)
-          console.log('Status before approve:', statusBeforeApprove, '(0=Draft, 1=Submitted, 2=Approved, 3=Rejected)')
-        } catch (e) {
-          console.error('Error checking status before approve:', e)
-          statusBeforeApprove = currentStatus
-        }
-        
-        // If already approved on-chain, skip approval step
-        if (statusBeforeApprove === 2) {
-          console.log('Project is already approved on-chain, skipping approval step')
-          toast({
-            title: "Project already approved on-chain",
-            description: "Proceeding to mint NFT...",
-          })
-        } else if (statusBeforeApprove === 1) {
-          // Project is Submitted, need to approve
-          // Only curators can approve, but if project is already approved off-chain,
-          // we should allow the owner to proceed (but they can't approve on-chain)
-          // So we'll check if user is curator, if not, show a helpful message
-          if (!isCuratorOrAdmin) {
-            throw new Error(`Project needs to be approved on-chain, but only curators can approve. The project is currently in "Submitted" status on-chain. Please ask a curator to approve it, or if you are a curator, make sure your wallet is connected.`)
-          }
-          
-          // Simulate the approval transaction first to catch errors early
-          try {
-            await publicClient.simulateContract({
-              address: projectRegistryAddress,
-              abi: projectRegistryAbi,
-              functionName: 'approve',
-              args: [onChainProjectId],
-              account: address as Address,
-            })
-          } catch (simError: any) {
-            const errorMsg = simError.message || simError.shortMessage || 'Unknown error'
-            console.error('Approve simulation error:', simError)
-            
-            // Provide specific error messages based on common revert reasons
-            if (errorMsg.includes('Not curator') || errorMsg.includes('Not admin')) {
-              throw new Error(`Cannot approve project. You are not a curator. Only curators can approve projects on-chain.`)
-            } else if (errorMsg.includes('Not submitted')) {
-              throw new Error(`Cannot approve project. Project status is ${statusBeforeApprove} (expected 1 = Submitted). Please ensure the project has been submitted on-chain first.`)
-            } else {
-              throw new Error(`Cannot approve project. Simulation failed: ${errorMsg}`)
-            }
-          }
-          
-          const approveData = encodeFunctionData({
-            abi: projectRegistryAbi,
-            functionName: 'approve',
-            args: [onChainProjectId],
-          })
-
-          toast({
-            title: "Approving project on-chain...",
-            description: "Please confirm the approval transaction",
-          })
-
-          const approveHash = await walletClient.sendTransaction({
-            account: address as Address,
-            to: projectRegistryAddress,
-            data: approveData,
-          })
-
-          const approveReceipt = await publicClient.waitForTransactionReceipt({ hash: approveHash })
-          
-          // Check if transaction was successful
-          if (approveReceipt.status === 'reverted') {
-            throw new Error(`Approval transaction failed. Transaction was reverted. The project must be in "Submitted" status to be approved. Check: https://testnet.arcscan.app/tx/${approveHash}`)
-          }
-          
-          toast({
-            title: "Project approved on-chain!",
-            description: "Proceeding to mint NFT...",
-          })
-        } else if (statusBeforeApprove !== 0) {
-          // Status is neither Draft, Submitted, nor Approved
-          throw new Error(`Cannot proceed. Project status on-chain is ${statusBeforeApprove} (0=Draft, 1=Submitted, 2=Approved, 3=Rejected). Expected Submitted (1) or Approved (2).`)
-        }
-
-        // Step 4: Mint NFT through ProjectRegistry (which calls ApprovalNFT)
-        // First verify the function exists by checking if we can encode it
-        let mintData: `0x${string}`
-        try {
-          mintData = encodeFunctionData({
-            abi: projectRegistryAbi,
-            functionName: 'mintApprovalNFT',
-            args: [onChainProjectId, project.owner_wallet as Address, metadataUrl],
-          })
-        } catch (encodeError: any) {
-          throw new Error(`Failed to prepare NFT mint transaction. The ProjectRegistry contract may not have the 'mintApprovalNFT' function. This requires redeploying the contract with the updated code. Error: ${encodeError.message}`)
-        }
-
-        toast({
-          title: "Minting approval NFT...",
-          description: "Please confirm the NFT minting transaction",
-        })
-
-        const nftHash = await walletClient.sendTransaction({
-          account: address as Address,
-          to: projectRegistryAddress,
-          data: mintData,
-        })
-
-        const nftReceipt = await publicClient.waitForTransactionReceipt({ hash: nftHash })
-        
-        // Check if NFT mint transaction was successful
-        if (nftReceipt.status === 'reverted') {
-          // Try to get revert reason if possible
-          let revertReason = ''
-          try {
-            // Check if it's a function not found error
-            const code = await publicClient.getBytecode({ address: projectRegistryAddress })
-            if (code && !code.includes('mintApprovalNFT'.slice(0, 8))) {
-              revertReason = '\n\n⚠️ The ProjectRegistry contract does not have the "mintApprovalNFT" function. The contract needs to be redeployed with the updated code.'
-            }
-          } catch (e) {
-            // Ignore errors when checking bytecode
-          }
-          
-          throw new Error(`NFT mint transaction failed. Transaction was reverted.${revertReason}\n\nCheck transaction: https://testnet.arcscan.app/tx/${nftHash}`)
-        }
-
-        toast({
-          title: "Project registered on-chain!",
-          description: "Project has been created, approved, and NFT minted successfully",
-        })
-        
-        // Reload project to get updated data (project_id, nft_token_id)
-        await loadProject()
-      } else if (response.approveTxData) {
-        // Project exists but may need submit and/or approval
-        const projectRegistryAbi = parseAbi([
-          'function submit(uint256 projectId) external',
-          'function approve(uint256 projectId) external',
-          'function getProject(uint256 projectId) external view returns (address owner, uint8 status, string memory metadataUri)',
-        ])
-        
-        // Check current status
-        let currentStatus: number
-        try {
-          const [owner, status] = await publicClient.readContract({
-            address: response.approveTxData.to as Address,
-            abi: projectRegistryAbi,
-            functionName: 'getProject',
-            args: [BigInt(project.project_id || 0)],
-          })
-          currentStatus = Number(status)
-        } catch (e) {
-          console.error('Error checking project status:', e)
-          currentStatus = 0 // Assume Draft
-        }
-        
-        // If Draft (0), submit first
-        if (currentStatus === 0) {
-          const submitData = encodeFunctionData({
-            abi: projectRegistryAbi,
-            functionName: 'submit',
-            args: [BigInt(project.project_id || 0)],
-          })
-
-          toast({
-            title: "Submitting project on-chain...",
-            description: "Please confirm the submission transaction",
-          })
-
-          const submitHash = await walletClient.sendTransaction({
-            account: address as Address,
-            to: response.approveTxData.to as Address,
-            data: submitData,
-          })
-
-          const submitReceipt = await publicClient.waitForTransactionReceipt({ hash: submitHash })
-          
-          if (submitReceipt.status === 'reverted') {
-            throw new Error(`Submission transaction failed. Transaction was reverted. Check: https://testnet.arcscan.app/tx/${submitHash}`)
-          }
-          
-          // Update currentStatus after submit
-          try {
-            await new Promise(resolve => setTimeout(resolve, 2000)) // Wait for state to update
-            const [ownerAfterSubmit, statusAfterSubmit] = await publicClient.readContract({
-              address: response.approveTxData.to as Address,
-              abi: projectRegistryAbi,
-              functionName: 'getProject',
-              args: [BigInt(project.project_id || 0)],
-            })
-            currentStatus = Number(statusAfterSubmit)
-            console.log('Status after submit:', currentStatus)
-          } catch (e) {
-            console.warn('Could not verify status after submit, assuming Submitted:', e)
-            currentStatus = 1 // Assume Submitted
-          }
-        }
-        
-        // Now approve (only if status is Submitted, skip if already Approved)
-        if (currentStatus === 1) {
-          // Project is Submitted, need to approve
-          // Only curators can approve
-          if (!isCuratorOrAdmin) {
-            throw new Error(`Project needs to be approved on-chain, but only curators can approve. The project is currently in "Submitted" status on-chain. Please ask a curator to approve it, or if you are a curator, make sure your wallet is connected.`)
-          }
-          
-          // Simulate first to catch errors early
-          try {
-            await publicClient.simulateContract({
-              address: response.approveTxData.to as Address,
-              abi: projectRegistryAbi,
-              functionName: 'approve',
-              args: [BigInt(project.project_id || 0)],
-              account: address as Address,
-            })
-          } catch (simError: any) {
-            const errorMsg = simError.message || simError.shortMessage || 'Unknown error'
-            console.error('Approve simulation error:', simError)
-            
-            if (errorMsg.includes('Not curator') || errorMsg.includes('Not admin')) {
-              throw new Error(`Cannot approve project. You are not a curator. Only curators can approve projects on-chain.`)
-            } else if (errorMsg.includes('Not submitted')) {
-              throw new Error(`Cannot approve project. Project status is ${currentStatus} (expected 1 = Submitted).`)
-            } else {
-              throw new Error(`Cannot approve project. Simulation failed: ${errorMsg}`)
-            }
-          }
-          
-          toast({
-            title: "Approving project on-chain...",
-            description: "Please confirm the approval transaction",
-          })
-
-          const approveData = encodeFunctionData({
-            abi: projectRegistryAbi,
-            functionName: 'approve',
-            args: [BigInt(project.project_id || 0)],
-          })
-
-          const approveHash = await walletClient.sendTransaction({
-            account: address as Address,
-            to: response.approveTxData.to as Address,
-            data: approveData,
-          })
-
-          const approveReceipt = await publicClient.waitForTransactionReceipt({ hash: approveHash })
-          
-          // Check if transaction was successful
-          if (approveReceipt.status === 'reverted') {
-            throw new Error(`Approval transaction failed. Transaction was reverted. The project must be in "Submitted" status to be approved. Check: https://testnet.arcscan.app/tx/${approveHash}`)
-          }
-          
-          toast({
-            title: "Project approved on-chain!",
-            description: "Proceeding to mint NFT...",
-          })
-        } else if (currentStatus === 2) {
-          // Already approved, skip approval
-          console.log('Project is already approved on-chain, skipping approval step')
-          toast({
-            title: "Project already approved on-chain",
-            description: "Proceeding to mint NFT...",
-          })
-        } else if (currentStatus !== 0) {
-          throw new Error(`Cannot proceed. Project status on-chain is ${currentStatus} (0=Draft, 1=Submitted, 2=Approved, 3=Rejected). Expected Submitted (1) or Approved (2).`)
-        }
-
-        // Mint NFT through ProjectRegistry
-        if (response.nftTxData) {
-          toast({
-            title: "Minting approval NFT...",
-            description: "Please confirm the NFT minting transaction",
-          })
-
-          const nftHash = await walletClient.sendTransaction({
-            account: address as Address,
-            to: response.nftTxData.to as Address,
-            data: response.nftTxData.data as `0x${string}`,
-          })
-
-          const nftReceipt = await publicClient.waitForTransactionReceipt({ hash: nftHash })
-          
-          // Check if NFT mint transaction was successful
-          if (nftReceipt.status === 'reverted') {
-            // Try to get revert reason if possible
-            let revertReason = ''
-            try {
-              const code = await publicClient.getBytecode({ address: response.nftTxData.to as Address })
-              if (code && !code.includes('mintApprovalNFT'.slice(0, 8))) {
-                revertReason = '\n\n⚠️ The ProjectRegistry contract does not have the "mintApprovalNFT" function. The contract needs to be redeployed with the updated code.'
-              }
-            } catch (e) {
-              // Ignore errors when checking bytecode
-            }
-            
-            throw new Error(`NFT mint transaction failed. Transaction was reverted.${revertReason}\n\nCheck transaction: https://testnet.arcscan.app/tx/${nftHash}`)
-          }
-        }
-
-        toast({
-          title: "Project registered on-chain!",
-          description: "Project has been approved and NFT minted successfully",
-        })
-        
-        // Reload project to get updated data
-        await loadProject()
-      } else if (response.nftTxData) {
-        // Project already approved, just mint NFT through ProjectRegistry
-        toast({
-          title: "Minting approval NFT...",
-          description: "Please confirm the NFT minting transaction",
-        })
-
-        const nftHash = await walletClient.sendTransaction({
-          account: address as Address,
-          to: response.nftTxData.to as Address,
-          data: response.nftTxData.data as `0x${string}`,
-        })
-
-        const nftReceipt = await publicClient.waitForTransactionReceipt({ hash: nftHash })
-        
-        // Check if NFT mint transaction was successful
-        if (nftReceipt.status === 'reverted') {
-          // Try to get revert reason if possible
-          let revertReason = ''
-          try {
-            const code = await publicClient.getBytecode({ address: response.nftTxData.to as Address })
-            if (code && !code.includes('mintApprovalNFT'.slice(0, 8))) {
-              revertReason = '\n\n⚠️ The ProjectRegistry contract does not have the "mintApprovalNFT" function. The contract needs to be redeployed with the updated code.'
-            }
-          } catch (e) {
-            // Ignore errors when checking bytecode
-          }
-          
-          throw new Error(`NFT mint transaction failed. Transaction was reverted.${revertReason}\n\nCheck transaction: https://testnet.arcscan.app/tx/${nftHash}`)
-        }
-
-        toast({
-          title: "NFT minted successfully!",
-          description: "Your approval NFT has been minted and sent to your wallet",
-        })
-        
-        // Reload project to get updated data
-        await loadProject()
+      const projectRegistryAddress = process.env.NEXT_PUBLIC_ARC_INDEX_REGISTRY_ADDRESS || process.env.NEXT_PUBLIC_PROJECT_REGISTRY_ADDRESS as Address
+      
+      // Use the new atomic function: registerApprovedProjectAndMint
+      // This function registers the project and mints NFT in one transaction
+      // It uses EIP-712 signature to prove curator approval (no re-approval needed)
+      if (!response.finalizeTxData) {
+        throw new Error('Failed to get finalization transaction data from API')
       }
+
+      toast({
+        title: "Registering project on-chain...",
+        description: "Please confirm the transaction. This will register the project and mint the NFT certificate to the project owner.",
+      })
+
+      const finalizeHash = await walletClient.sendTransaction({
+        account: address as Address,
+        to: response.finalizeTxData.to as Address,
+        data: response.finalizeTxData.data as `0x${string}`,
+      })
+
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: finalizeHash })
+      
+      // Check if transaction was successful
+      if (receipt.status === 'reverted') {
+        throw new Error(`Registration transaction failed. Transaction was reverted. Check: https://testnet.arcscan.app/tx/${finalizeHash}`)
+      }
+      
+      console.log('Project finalization receipt:', {
+        hash: receipt.transactionHash,
+        status: receipt.status,
+        blockNumber: receipt.blockNumber,
+      })
+
+      // Extract project ID and NFT token ID from ProjectFinalized event
+      const projectFinalizedEventAbi = parseAbi([
+        'event ProjectFinalized(uint256 indexed projectId, address indexed owner, address indexed finalizer, uint256 certificateTokenId)',
+        'event ProjectApproved(uint256 indexed projectId, address indexed curator, uint256 indexed certificateTokenId)',
+      ])
+
+      let onChainProjectId: bigint | null = null
+      let certificateTokenId: bigint | null = null
+      
+      try {
+        const logs = receipt.logs
+        const projectRegistryLogs = logs.filter(log => 
+          log.address.toLowerCase() === projectRegistryAddress.toLowerCase()
+        )
+        
+        for (const log of projectRegistryLogs) {
+          try {
+            const decoded = decodeEventLog({
+              abi: projectFinalizedEventAbi,
+              data: log.data,
+              topics: log.topics,
+            })
+            
+            if (decoded.eventName === 'ProjectFinalized') {
+              onChainProjectId = decoded.args.projectId as bigint
+              certificateTokenId = decoded.args.certificateTokenId as bigint
+              console.log('✅ Extracted from ProjectFinalized event:', {
+                projectId: onChainProjectId,
+                tokenId: certificateTokenId,
+                owner: decoded.args.owner,
+                finalizer: decoded.args.finalizer,
+              })
+              break
+            } else if (decoded.eventName === 'ProjectApproved') {
+              // Fallback to ProjectApproved event
+              onChainProjectId = decoded.args.projectId as bigint
+              certificateTokenId = decoded.args.certificateTokenId as bigint
+              console.log('✅ Extracted from ProjectApproved event:', {
+                projectId: onChainProjectId,
+                tokenId: certificateTokenId,
+              })
+            }
+          } catch (e) {
+            // Not the event we're looking for, continue
+          }
+        }
+      } catch (e) {
+        console.error('Error decoding finalization event:', e)
+      }
+
+      // Update database with on-chain project_id and nft_token_id
+      if (onChainProjectId && certificateTokenId) {
+        try {
+          // Call API to update database
+          await projectsAPI.updateOnChain(projectId, finalizeHash);
+          
+          toast({
+            title: "Project registered on-chain!",
+            description: `Project ID: #${Number(onChainProjectId)}. NFT certificate #${Number(certificateTokenId)} has been minted to the project owner.`,
+          });
+        } catch (updateError: any) {
+          console.error('Error updating database:', updateError);
+          // Don't fail the whole flow - indexer will sync it
+          toast({
+            title: "Project registered on-chain!",
+            description: `Project ID: #${Number(onChainProjectId)}. NFT certificate #${Number(certificateTokenId)} has been minted. Database will sync shortly via indexer.`,
+          });
+        }
+      } else {
+        // If we couldn't extract IDs from events, try to update anyway using the API
+        try {
+          await projectsAPI.updateOnChain(projectId, finalizeHash);
+          toast({
+            title: "Project registered on-chain!",
+            description: "Project has been registered and NFT certificate has been minted to the project owner.",
+          });
+        } catch (updateError) {
+          console.error('Error updating database:', updateError);
+          toast({
+            title: "Project registered on-chain!",
+            description: "Project has been registered and NFT certificate has been minted. Database will sync via indexer.",
+          });
+        }
+      }
+      
+      // Reload project to get updated data (project_id, nft_token_id)
+      await loadProject()
     } catch (error: any) {
       console.error("Error registering on-chain:", error)
       
@@ -1278,20 +916,26 @@ export default function ProjectDetailsPage() {
     } finally {
       setIsRegistering(false)
     }
-    */
   }
 
   function formatAddress(address: string) {
     return `${address.slice(0, 6)}...${address.slice(-4)}`
   }
 
-  function formatUSDC(amount: number) {
+  function formatUSDC(amount: number | string | null | undefined) {
+    // Parse amount correctly - Supabase NUMERIC(18,6) returns as string
+    const numAmount = typeof amount === 'string' 
+      ? parseFloat(amount) 
+      : typeof amount === 'number' 
+      ? amount 
+      : 0;
+    
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
       minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount)
+      maximumFractionDigits: 2,
+    }).format(numAmount)
   }
 
   if (isLoading) {
@@ -1401,7 +1045,7 @@ export default function ProjectDetailsPage() {
                 <div className="text-center">
                   <DollarSign className="mx-auto mb-1 h-5 w-5 text-primary" />
                   <div className="text-sm font-medium">
-                    {formatUSDC(Number(project.funding_agg?.total_usdc || 0))}
+                    {formatUSDC(project.funding_agg?.total_usdc)}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {project.funding_agg?.funding_count || 0} donations
@@ -1560,16 +1204,26 @@ export default function ProjectDetailsPage() {
               <CardTitle>Rate this Project</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="mb-4">
-                <StarRating value={userRating} onChange={handleRate} size="lg" disabled={isRating} />
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {isRating
-                  ? "Submitting rating on-chain..."
-                  : isConnected
-                  ? "Click on the stars to rate this project on-chain"
-                  : "Connect your wallet to rate projects"}
-              </p>
+              {!project.project_id ? (
+                <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-4">
+                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                    This project hasn't been registered on the blockchain yet. Rating will be available once the project owner or a curator completes the on-chain registration.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="mb-4">
+                    <StarRating value={userRating} onChange={handleRate} size="lg" disabled={isRating} />
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {isRating
+                      ? "Submitting rating on-chain..."
+                      : isConnected
+                      ? "Click on the stars to rate this project on-chain"
+                      : "Connect your wallet to rate projects"}
+                  </p>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -1579,26 +1233,51 @@ export default function ProjectDetailsPage() {
               <CardTitle>Support this Project</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                <div className="flex gap-2">
-                  <Input
-                    type="number"
-                    placeholder="Amount in USDC"
-                    value={donationAmount}
-                    onChange={(e) => setDonationAmount(e.target.value)}
-                    className="flex-1"
-                  />
-                  <Button onClick={handleDonate} disabled={!isConnected || isFunding}>
-                    <DollarSign className="mr-2 h-4 w-4" />
-                    {isFunding ? "Processing..." : "Donate"}
-                  </Button>
+              {!project.project_id ? (
+                <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-4">
+                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                    This project hasn't been registered on the blockchain yet. Donations will be available once the project owner or a curator completes the on-chain registration.
+                  </p>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  {isConnected
-                    ? "Donations are sent directly to the project owner (on-chain funding coming soon)"
-                    : "Connect your wallet to support projects"}
-                </p>
-              </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex gap-2">
+                    <Input
+                      type="number"
+                      placeholder="Amount in USDC"
+                      value={donationAmount}
+                      onChange={(e) => setDonationAmount(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button onClick={handleDonate} disabled={!isConnected || isFunding}>
+                      <DollarSign className="mr-2 h-4 w-4" />
+                      {isFunding ? "Processing..." : "Donate"}
+                    </Button>
+                  </div>
+                  {/* Fee breakdown when amount is entered */}
+                  {donationAmount && Number.parseFloat(donationAmount) > 0 && (
+                    <div className="rounded-lg bg-muted/50 p-3 text-sm">
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Donation amount:</span>
+                        <span>{Number.parseFloat(donationAmount).toFixed(2)} USDC</span>
+                      </div>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Platform fee (2.5%):</span>
+                        <span>-{(Number.parseFloat(donationAmount) * 0.025).toFixed(2)} USDC</span>
+                      </div>
+                      <div className="mt-2 flex justify-between border-t border-border/40 pt-2 font-medium">
+                        <span>Project receives:</span>
+                        <span className="text-primary">{(Number.parseFloat(donationAmount) * 0.975).toFixed(2)} USDC</span>
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-sm text-muted-foreground">
+                    {isConnected
+                      ? "Donations are sent directly to the project owner on-chain. A 2.5% platform fee supports Arc Index operations."
+                      : "Connect your wallet to support projects"}
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
 

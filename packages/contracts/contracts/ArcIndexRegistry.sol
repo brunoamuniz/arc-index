@@ -4,6 +4,8 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./interfaces/IArcIndexCertificateNFT.sol";
@@ -13,10 +15,19 @@ import "./interfaces/IArcIndexCertificateNFT.sol";
  * @notice Main registry for Arc Index projects with curation, ratings, and donations
  * @dev Uses AccessControl for role management, Pausable for emergency stops
  */
-contract ArcIndexRegistry is AccessControl, Pausable, ReentrancyGuard {
+contract ArcIndexRegistry is AccessControl, Pausable, ReentrancyGuard, EIP712 {
     using SafeERC20 for IERC20;
+    using ECDSA for bytes32;
 
     bytes32 public constant CURATOR_ROLE = keccak256("CURATOR_ROLE");
+    
+    /// @notice EIP-712 type hash for project approval signature
+    bytes32 public constant PROJECT_APPROVAL_TYPEHASH = keccak256(
+        "ProjectApproval(uint256 projectId,address approvedOwner,string metadataURI,uint256 deadline,uint256 nonce)"
+    );
+    
+    /// @notice Mapping to track used nonces for approval signatures
+    mapping(uint256 => bool) public usedApprovalNonces;
 
     /// @notice USDC token address on Arc Testnet
     address public constant USDC = 0x3600000000000000000000000000000000000000;
@@ -92,6 +103,13 @@ contract ArcIndexRegistry is AccessControl, Pausable, ReentrancyGuard {
         string reason
     );
 
+    event ProjectFinalized(
+        uint256 indexed projectId,
+        address indexed owner,
+        address indexed finalizer,
+        uint256 certificateTokenId
+    );
+
     event ProjectRated(
         uint256 indexed projectId,
         address indexed rater,
@@ -119,6 +137,10 @@ contract ArcIndexRegistry is AccessControl, Pausable, ReentrancyGuard {
     error InvalidAmount();
     error InvalidAddress();
     error InvalidFeeBps();
+    error InvalidSignature();
+    error SignatureExpired();
+    error NonceAlreadyUsed();
+    error NotCurator();
 
     /**
      * @notice Constructor
@@ -130,7 +152,7 @@ contract ArcIndexRegistry is AccessControl, Pausable, ReentrancyGuard {
         address _certificateNFT,
         address _treasury,
         uint16 _feeBps
-    ) {
+    ) EIP712("ArcIndexRegistry", "1") {
         if (_certificateNFT == address(0)) revert InvalidAddress();
         if (_treasury == address(0)) revert InvalidAddress();
         if (_feeBps > MAX_FEE_BPS) revert InvalidFeeBps();
@@ -249,6 +271,126 @@ contract ArcIndexRegistry is AccessControl, Pausable, ReentrancyGuard {
         project.status = Status.Rejected;
 
         emit ProjectRejected(projectId, msg.sender, reason);
+    }
+
+    // ============ Finalization (Register Approved Project) ============
+
+    /**
+     * @notice Register an already-approved project on-chain and mint NFT in one atomic transaction
+     * @dev Uses EIP-712 signature to prove curator approval without re-approving
+     *      Project is ALREADY approved off-chain - this function finalizes it on-chain
+     *      NFT is ALWAYS minted to approvedOwner, never to msg.sender
+     * @param projectId The project ID (0 = create new, >0 = use existing)
+     * @param approvedOwner The owner address from the approval signature (NFT recipient)
+     * @param metadataURI The project metadata URI
+     * @param deadline Signature expiration timestamp
+     * @param nonce Unique nonce to prevent replay attacks
+     * @param curatorSignature EIP-712 signature from curator proving approval
+     * @return The project ID (newly created or existing)
+     * @return The minted certificate token ID
+     */
+    function registerApprovedProjectAndMint(
+        uint256 projectId,
+        address approvedOwner,
+        string calldata metadataURI,
+        uint256 deadline,
+        uint256 nonce,
+        bytes calldata curatorSignature
+    )
+        external
+        whenNotPaused
+        nonReentrant
+        returns (uint256, uint256)
+    {
+        // Verify signature is not expired
+        if (block.timestamp > deadline) revert SignatureExpired();
+        
+        // Verify nonce hasn't been used
+        if (usedApprovalNonces[nonce]) revert NonceAlreadyUsed();
+        usedApprovalNonces[nonce] = true;
+
+        // Verify curator signature
+        bytes32 structHash = keccak256(
+            abi.encode(
+                PROJECT_APPROVAL_TYPEHASH,
+                projectId,
+                approvedOwner,
+                keccak256(bytes(metadataURI)),
+                deadline,
+                nonce
+            )
+        );
+        
+        bytes32 hash = _hashTypedDataV4(structHash);
+        address signer = hash.recover(curatorSignature);
+        
+        if (!hasRole(CURATOR_ROLE, signer)) revert NotCurator();
+
+        // Determine actual project ID and if project exists
+        uint256 actualProjectId = projectId;
+        bool isNewProject = (projects[projectId].owner == address(0));
+
+        if (isNewProject) {
+            // If projectId is 0, use nextProjectId; otherwise use provided projectId
+            if (projectId == 0) {
+                actualProjectId = nextProjectId++;
+            }
+            
+            // Create new project with Approved status (already approved off-chain)
+            projects[actualProjectId] = Project({
+                owner: approvedOwner,
+                status: Status.Approved,
+                metadataURI: metadataURI,
+                submittedAt: uint64(block.timestamp),
+                approvedAt: uint64(block.timestamp),
+                approvedBy: signer,
+                certificateTokenId: 0,
+                ratingCount: 0,
+                ratingSum: 0,
+                totalDonatedUSDC6: 0
+            });
+        } else {
+            // Project exists on-chain - verify it's not already finalized
+            if (projects[projectId].certificateTokenId != 0) {
+                revert InvalidStatus(); // Already finalized
+            }
+            
+            // Project exists but not finalized - verify status allows finalization
+            if (projects[projectId].status == Status.Rejected) {
+                revert InvalidStatus(); // Cannot finalize rejected project
+            }
+            
+            // If project is Pending, update to Approved
+            if (projects[projectId].status == Status.Pending) {
+                projects[projectId].status = Status.Approved;
+                projects[projectId].approvedAt = uint64(block.timestamp);
+                projects[projectId].approvedBy = signer;
+            }
+            
+            // Verify approved owner matches the existing project owner
+            if (projects[projectId].owner != approvedOwner) {
+                revert InvalidStatus(); // Owner mismatch
+            }
+            
+            // Update metadata if different
+            if (keccak256(bytes(projects[projectId].metadataURI)) != keccak256(bytes(metadataURI))) {
+                projects[projectId].metadataURI = metadataURI;
+            }
+        }
+
+        // Mint certificate NFT to approved owner (NEVER to msg.sender)
+        uint256 tokenId = certificateNFT.mintCertificate(
+            approvedOwner,
+            actualProjectId,
+            metadataURI
+        );
+        projects[actualProjectId].certificateTokenId = tokenId;
+
+        // Emit events
+        emit ProjectApproved(actualProjectId, signer, tokenId);
+        emit ProjectFinalized(actualProjectId, approvedOwner, msg.sender, tokenId);
+
+        return (actualProjectId, tokenId);
     }
 
     // ============ Ratings ============

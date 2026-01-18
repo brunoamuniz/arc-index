@@ -49,13 +49,20 @@ export default function LandingPage() {
     }
   }
 
-  function formatUSDC(amount: number) {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
+  function formatUSDC(amount: number | string | null | undefined) {
+    // Parse amount correctly - Supabase NUMERIC(18,6) returns as string
+    const numAmount = typeof amount === 'string' 
+      ? parseFloat(amount) 
+      : typeof amount === 'number' 
+      ? amount 
+      : 0;
+    
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
       minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount)
+      maximumFractionDigits: 2,
+    }).format(numAmount);
   }
 
   const steps = [
@@ -472,7 +479,7 @@ export default function LandingPage() {
                           ) : null}
                         </div>
                         <div className="font-mono font-semibold text-primary">
-                          {formatUSDC(Number(project.funding_agg?.total_usdc || 0))}
+                          {formatUSDC(project.funding_agg?.total_usdc)}
                         </div>
                       </div>
                     </CardContent>
@@ -569,7 +576,7 @@ export default function LandingPage() {
 
               <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
                 <Button asChild size="lg" className="group h-14 gap-3 rounded-xl px-8 text-lg font-semibold shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30">
-                  <Link href="/submit">
+                  <Link href="/submit" className="flex items-center gap-3">
                     Submit Your Project
                     <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
                   </Link>

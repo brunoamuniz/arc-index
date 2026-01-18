@@ -87,13 +87,20 @@ export default function ExplorePage() {
     return `${address.slice(0, 6)}...${address.slice(-4)}`
   }
 
-  function formatUSDC(amount: number) {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
+  function formatUSDC(amount: number | string | null | undefined) {
+    // Parse amount correctly - Supabase NUMERIC(18,6) returns as string
+    const numAmount = typeof amount === 'string' 
+      ? parseFloat(amount) 
+      : typeof amount === 'number' 
+      ? amount 
+      : 0;
+    
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
       minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount)
+      maximumFractionDigits: 2,
+    }).format(numAmount);
   }
 
   return (
@@ -239,7 +246,7 @@ export default function ExplorePage() {
                             </span>
                           </div>
                           <div className="text-muted-foreground">
-                            {formatUSDC(Number(project.funding_agg?.total_usdc || 0))} funded
+                            {formatUSDC(project.funding_agg?.total_usdc)} funded
                           </div>
                         </div>
                         <div className="flex items-center gap-4 text-xs text-muted-foreground">

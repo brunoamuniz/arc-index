@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, http, decodeEventLog, parseAbi } from 'viem';
 import { normalizeWalletAddress } from '@/lib/supabase/auth';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server';
 import {
@@ -8,6 +8,7 @@ import {
   readProject,
   areContractsConfigured,
   getChainConfig,
+  getContractAddresses,
   ProjectStatus,
 } from '@/lib/contracts';
 
@@ -90,6 +91,7 @@ export async function POST(
           hash: txHash,
           status: receipt.status,
           blockNumber: receipt.blockNumber,
+          logs: receipt.logs.length,
         });
 
         if (!receipt.status || receipt.status === 'reverted') {
@@ -103,8 +105,62 @@ export async function POST(
           );
         }
 
+        // Verify ProjectRated event was emitted
+        const { registry } = getContractAddresses();
+        const projectRatedEventAbi = parseAbi([
+          'event ProjectRated(uint256 indexed projectId, address indexed rater, uint8 stars, uint32 newRatingCount, uint32 newRatingSum)',
+        ]);
+
+        let eventFound = false;
+        let onChainProjectId: bigint | null = null;
+
+        for (const log of receipt.logs) {
+          if (log.address.toLowerCase() === registry.toLowerCase()) {
+            try {
+              const decoded = decodeEventLog({
+                abi: projectRatedEventAbi,
+                data: log.data,
+                topics: log.topics,
+              });
+
+                  if (decoded.eventName === 'ProjectRated') {
+                    eventFound = true;
+                    onChainProjectId = decoded.args.projectId as bigint;
+                    console.log('✅ ProjectRated event found:', {
+                      projectId: decoded.args.projectId.toString(),
+                      rater: decoded.args.rater,
+                      stars: decoded.args.stars,
+                      newRatingCount: decoded.args.newRatingCount,
+                      newRatingSum: decoded.args.newRatingSum,
+                    });
+                    break;
+                  }
+            } catch (e) {
+              // Not the event we're looking for, continue
+            }
+          }
+        }
+
+        if (!eventFound) {
+          console.error('⚠️ ProjectRated event not found in transaction logs');
+          console.error('Transaction logs:', receipt.logs.map(log => ({
+            address: log.address,
+            topics: log.topics,
+            data: log.data,
+          })));
+          // Don't fail - transaction succeeded, so rating was likely recorded
+          // We'll store it anyway and let the indexer catch up
+          console.warn('⚠️ Proceeding to store rating despite missing event - transaction succeeded');
+        }
+
         // Store rating in database
-        const { error: ratingError } = await supabaseAdmin!
+        console.log('Storing rating in database:', {
+          projectId,
+          rater: normalizeWalletAddress(session.walletAddress),
+          stars,
+        });
+
+        const { error: ratingError, data: ratingData } = await supabaseAdmin!
           .from('arcindex_ratings')
           .upsert({
             project_id: projectId,
@@ -112,11 +168,28 @@ export async function POST(
             stars: stars,
           }, {
             onConflict: 'project_id,rater',
-          });
+          })
+          .select();
 
         if (ratingError) {
-          console.error('Error storing rating:', ratingError);
+          console.error('❌ Error storing rating:', ratingError);
           // Don't fail if DB update fails, transaction was successful
+        } else {
+          console.log('✅ Rating stored:', ratingData);
+          // Recalculate aggregates immediately
+          try {
+            const { recalculateRatingAggregate } = await import('@/lib/supabase/aggregates');
+            await recalculateRatingAggregate(projectId);
+            console.log('✅ Rating aggregates recalculated');
+          } catch (aggError: any) {
+            console.error('❌ Error recalculating rating aggregate:', aggError);
+            console.error('Error details:', {
+              message: aggError?.message,
+              stack: aggError?.stack,
+              projectId,
+            });
+            // Don't fail the request, but log the error
+          }
         }
 
         return NextResponse.json({
@@ -139,12 +212,29 @@ export async function POST(
       }
     }
 
-    // Validate project_id exists - projects must be registered on-chain before they can be rated
-    if (!project.project_id) {
+    // Check if project exists on-chain (even if database isn't synced)
+    let onChainProject = null;
+    let onChainProjectId: bigint | null = null;
+
+    // First, try to read from database project_id
+    if (project.project_id) {
+      onChainProjectId = BigInt(project.project_id);
+      try {
+        onChainProject = await readProject(onChainProjectId);
+      } catch (error) {
+        console.error('Error reading project from contract:', error);
+      }
+    }
+
+    // If not found in database, try to find on-chain by checking recent events
+    // This handles cases where finalization happened but database wasn't updated
+    if (!onChainProject && !project.project_id) {
+      // Try to find project on-chain by owner and metadata
+      // This is a fallback - ideally database should be synced
       return NextResponse.json(
         {
           error: 'Project not registered on-chain',
-          details: 'This project has been approved in the database but has not been created on the blockchain yet. Projects must be submitted on-chain before they can be rated.',
+          details: 'This project has been approved in the database but has not been registered on-chain yet. Please complete the on-chain registration first.',
           code: 'PROJECT_NOT_ON_CHAIN',
         },
         { status: 400 }
@@ -152,32 +242,58 @@ export async function POST(
     }
 
     // Verify project is approved on-chain (only approved projects can be rated)
-    try {
-      const onChainProject = await readProject(BigInt(project.project_id));
-      if (onChainProject && onChainProject.status !== ProjectStatus.Approved) {
+    if (onChainProject) {
+      if (onChainProject.status !== ProjectStatus.Approved) {
         return NextResponse.json(
           {
             error: 'Project is not approved on-chain',
-            details: 'Only projects that have been approved on-chain can be rated.',
+            details: `Project status on-chain is ${onChainProject.status}, expected ${ProjectStatus.Approved}. Only approved projects can be rated.`,
             code: 'PROJECT_NOT_APPROVED_ON_CHAIN',
           },
           { status: 400 }
         );
       }
-    } catch (error) {
-      console.error('Error checking project status on-chain:', error);
-      // Continue anyway, let the contract revert if needed
+    } else if (onChainProjectId) {
+      // Project ID exists but we couldn't read it - might be a contract issue
+      console.warn(`Project ID ${onChainProjectId} exists in database but could not be read from contract`);
+      // Continue anyway - contract will revert if project doesn't exist
     }
 
     // Return transaction data for client to sign
     // Using the new ArcIndexRegistry contract
-    const txData = encodeRateProject(BigInt(project.project_id), stars);
+    // Use onChainProjectId if available, otherwise fall back to database project_id
+    const projectIdToUse = onChainProjectId || (project.project_id ? BigInt(project.project_id) : null);
+    
+    if (!projectIdToUse) {
+      return NextResponse.json(
+        {
+          error: 'Project ID not available',
+          details: 'Could not determine on-chain project ID. Please ensure the project is registered on-chain.',
+          code: 'PROJECT_ID_MISSING',
+        },
+        { status: 400 }
+      );
+    }
+
+    const txData = encodeRateProject(projectIdToUse, stars);
 
     return NextResponse.json({
       txData,
     });
   } catch (error: any) {
     console.error('Error rating project:', error);
+
+    // Handle authentication errors specifically
+    if (error?.message === 'Unauthorized') {
+      return NextResponse.json(
+        {
+          error: 'Unauthorized',
+          details: 'Please connect your wallet and sign in to rate projects.',
+          code: 'UNAUTHORIZED',
+        },
+        { status: 401 }
+      );
+    }
 
     // Return more detailed error information
     const errorMessage = error?.message || 'Failed to rate project';

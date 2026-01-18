@@ -3,13 +3,17 @@ import { requireAuth, requireCuratorOrAdmin } from '@/lib/auth/session';
 import { normalizeWalletAddress } from '@/lib/supabase/auth';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server';
 import {
-  encodeSubmitProject,
-  encodeApproveProject,
-  readProject,
   areContractsConfigured,
   getContractAddresses,
-  ProjectStatus,
+  getChainConfig,
 } from '@/lib/contracts';
+import {
+  generateProjectApprovalSignature,
+  generateApprovalNonce,
+  calculateSignatureDeadline,
+} from '@/lib/contracts/eip712';
+import { encodeFunctionData } from 'viem';
+import type { Address } from 'viem';
 
 export async function POST(
   request: NextRequest,
@@ -92,69 +96,85 @@ export async function POST(
     }
 
     const metadataUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://arcindex.xyz'}/api/metadata/${project.id}`;
+    const approvedOwner = normalizeWalletAddress(project.owner_wallet) as Address;
 
-    // With the new ArcIndexRegistry, we use submitProject which:
-    // 1. Creates project in Pending status
-    // 2. Then a curator calls approveProject which automatically mints the NFT
-
-    // For projects not yet on-chain, we need to:
-    // 1. Submit the project (anyone can do this for their own project)
-    // 2. Approve the project (curator only, which mints the NFT)
-
-    let submitTxData = undefined;
-    let approveTxData = undefined;
-
-    if (!project.project_id) {
-      // Project not on-chain yet, need to submit first
-      submitTxData = encodeSubmitProject(metadataUrl);
-    } else {
-      // Project exists on-chain, check its status
-      try {
-        const onChainProject = await readProject(BigInt(project.project_id));
-
-        if (onChainProject) {
-          const currentStatus = onChainProject.status;
-
-          // Status: 0 = None, 1 = Pending, 2 = Approved, 3 = Rejected
-          if (currentStatus === ProjectStatus.Pending) {
-            // Project is Pending, need to approve (curator only)
-            if (isCuratorOrAdmin) {
-              approveTxData = encodeApproveProject(BigInt(project.project_id));
-            } else {
-              return NextResponse.json(
-                { error: 'Only curators can approve projects on-chain' },
-                { status: 403 }
-              );
-            }
-          } else if (currentStatus === ProjectStatus.Approved) {
-            // Already approved on-chain
-            return NextResponse.json(
-              { error: 'Project is already approved on-chain' },
-              { status: 400 }
-            );
-          } else if (currentStatus === ProjectStatus.Rejected) {
-            return NextResponse.json(
-              { error: 'Project was rejected on-chain' },
-              { status: 400 }
-            );
-          }
-        }
-      } catch (error) {
-        console.error('Error checking project status on-chain:', error);
-        // If we can't read the project, it might not exist yet
-        submitTxData = encodeSubmitProject(metadataUrl);
-      }
+    // Get curator private key for signature generation
+    // Priority: 1) CURATOR_PRIVATE_KEY env var, 2) ADMIN_PRIVATE_KEY as fallback
+    const curatorPrivateKey = (process.env.CURATOR_PRIVATE_KEY || process.env.ADMIN_PRIVATE_KEY) as `0x${string}` | undefined;
+    
+    if (!curatorPrivateKey) {
+      return NextResponse.json(
+        { 
+          error: 'Curator private key not configured',
+          details: 'CURATOR_PRIVATE_KEY or ADMIN_PRIVATE_KEY must be set in environment variables to generate approval signatures'
+        },
+        { status: 503 }
+      );
     }
 
-    // Note: In the new contract, approveProject automatically mints the NFT
-    // No need for separate NFT minting transaction
+    // Determine on-chain project ID (0 for new projects, existing ID if already on-chain)
+    const onChainProjectId = project.project_id ? BigInt(project.project_id) : BigInt(0);
+    
+    // Generate EIP-712 signature proving curator approval
+    const nonce = generateApprovalNonce();
+    const deadline = calculateSignatureDeadline(24); // 24 hours validity
+    
+    let approvalSignature;
+    try {
+      approvalSignature = await generateProjectApprovalSignature(
+        curatorPrivateKey,
+        onChainProjectId,
+        approvedOwner,
+        metadataUrl,
+        deadline,
+        nonce
+      );
+    } catch (error: any) {
+      console.error('Error generating curator signature:', error);
+      return NextResponse.json(
+        {
+          error: 'Failed to generate curator approval signature',
+          details: error.message || 'Signature generation failed'
+        },
+        { status: 500 }
+      );
+    }
+
+    // Encode the atomic registration function call
+    const { registry } = getContractAddresses();
+    const { chainId } = getChainConfig();
+    
+    // Import ABI - use the same import path as lib/contracts/index.ts
+    const { ArcIndexRegistryABI } = await import('@arc-index/contracts/abis');
+    
+    const finalizeTxData = encodeFunctionData({
+      abi: ArcIndexRegistryABI,
+      functionName: 'registerApprovedProjectAndMint',
+      args: [
+        approvalSignature.projectId,
+        approvalSignature.approvedOwner,
+        approvalSignature.metadataURI,
+        approvalSignature.deadline,
+        approvalSignature.nonce,
+        approvalSignature.signature,
+      ],
+    });
 
     return NextResponse.json({
       success: true,
-      submitTxData, // Transaction to submit project on-chain (if not yet submitted)
-      approveTxData, // Transaction to approve project on-chain (curator only)
-      needsSubmission: !!submitTxData,
-      needsApproval: !!approveTxData,
+      finalizeTxData: {
+        to: registry,
+        data: finalizeTxData,
+        chainId,
+      },
+      // Include signature details for debugging/verification
+      signature: {
+        signer: approvalSignature.signer,
+        projectId: approvalSignature.projectId.toString(),
+        approvedOwner: approvalSignature.approvedOwner,
+        deadline: approvalSignature.deadline.toString(),
+        nonce: approvalSignature.nonce.toString(),
+      },
       // Contract addresses for reference
       contracts: getContractAddresses(),
     });

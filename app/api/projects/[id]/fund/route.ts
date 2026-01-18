@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/session';
-import { createPublicClient, http, parseUnits, type Address } from 'viem';
+import { createPublicClient, http, parseUnits, decodeEventLog, parseAbi, type Address } from 'viem';
 import { normalizeWalletAddress } from '@/lib/supabase/auth';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server';
 import {
@@ -78,27 +78,140 @@ export async function POST(
         hash: txHash as `0x${string}`,
       });
 
+      console.log('Donation transaction receipt:', {
+        hash: txHash,
+        status: receipt.status,
+        blockNumber: receipt.blockNumber,
+        logs: receipt.logs.length,
+      });
+
       if (!receipt.status || receipt.status === 'reverted') {
         return NextResponse.json(
-          { error: 'Transaction failed' },
+          { 
+            error: 'Transaction failed',
+            details: `Transaction status: ${receipt.status}. Check the transaction on the blockchain explorer: https://testnet.arcscan.app/tx/${txHash}`,
+            txHash
+          },
           { status: 400 }
         );
       }
 
+      // Verify ProjectDonated event was emitted
+      const { registry } = getContractAddresses();
+      const projectDonatedEventAbi = parseAbi([
+        'event ProjectDonated(uint256 indexed projectId, address indexed donor, uint256 amount, uint256 fee)',
+      ]);
+
+      let eventFound = false;
+      let onChainProjectId: bigint | null = null;
+      let donatedAmount: bigint | null = null;
+
+      for (const log of receipt.logs) {
+        if (log.address.toLowerCase() === registry.toLowerCase()) {
+          try {
+            const decoded = decodeEventLog({
+              abi: projectDonatedEventAbi,
+              data: log.data,
+              topics: log.topics,
+            });
+
+            if (decoded.eventName === 'ProjectDonated') {
+              eventFound = true;
+              onChainProjectId = decoded.args.projectId as bigint;
+              donatedAmount = decoded.args.amount as bigint;
+              console.log('✅ ProjectDonated event found:', {
+                projectId: decoded.args.projectId.toString(),
+                donor: decoded.args.donor,
+                amount: decoded.args.amount.toString(),
+                fee: decoded.args.fee.toString(),
+              });
+              break;
+            }
+          } catch (e) {
+            // Not the event we're looking for, continue
+          }
+        }
+      }
+
+      if (!eventFound) {
+        console.error('⚠️ ProjectDonated event not found in transaction logs');
+        console.error('Transaction logs:', receipt.logs.map(log => ({
+          address: log.address,
+          topics: log.topics,
+          data: log.data,
+        })));
+        // Don't fail - transaction succeeded, so donation was likely recorded
+        // We'll store it anyway and let the indexer catch up
+        console.warn('⚠️ Proceeding to store donation despite missing event - transaction succeeded');
+      }
+
+      // Verify USDC Transfer event was also emitted
+      const { usdc } = getContractAddresses();
+      const transferEventAbi = parseAbi([
+        'event Transfer(address indexed from, address indexed to, uint256 value)',
+      ]);
+
+      let transferFound = false;
+      for (const log of receipt.logs) {
+        if (log.address.toLowerCase() === usdc.toLowerCase()) {
+          try {
+            const decoded = decodeEventLog({
+              abi: transferEventAbi,
+              data: log.data,
+              topics: log.topics,
+            });
+
+            if (decoded.eventName === 'Transfer') {
+              transferFound = true;
+              console.log('✅ USDC Transfer event found:', {
+                from: decoded.args.from,
+                to: decoded.args.to,
+                value: decoded.args.value.toString(),
+              });
+              break;
+            }
+          } catch (e) {
+            // Not the event we're looking for, continue
+          }
+        }
+      }
+
+      if (!transferFound) {
+        console.warn('⚠️ USDC Transfer event not found - donation may not have transferred funds');
+      }
+
       // Store funding in database
-      const amountWei = parseUnits(amount, 6); // USDC has 6 decimals
+      // amount_usdc column is NUMERIC(18,6) which stores USDC with 6 decimal places
+      // So we store the amount directly as USDC (not in wei)
+      const amountUSDC = parseFloat(amount); // Already in USDC units
       const { error: fundingError } = await supabaseAdmin!
         .from('arcindex_fundings')
         .insert({
           project_id: id,
           funder: normalizeWalletAddress(session.walletAddress),
-          amount_usdc: amountWei.toString(),
+          amount_usdc: amountUSDC, // Store as USDC (database handles 6 decimals)
           tx_hash: txHash,
         });
 
       if (fundingError) {
         console.error('Error storing funding:', fundingError);
         // Don't fail if DB update fails, transaction was successful
+      } else {
+        console.log('✅ Funding stored in database, recalculating aggregates...');
+        // Recalculate aggregates immediately
+        try {
+          const { recalculateFundingAggregate } = await import('@/lib/supabase/aggregates');
+          await recalculateFundingAggregate(id);
+          console.log('✅ Funding aggregates recalculated successfully');
+        } catch (aggError: any) {
+          console.error('❌ Error recalculating funding aggregate:', aggError);
+          console.error('Error details:', {
+            message: aggError?.message,
+            stack: aggError?.stack,
+            projectId: id,
+          });
+          // Don't fail the request, but log the error
+        }
       }
 
       return NextResponse.json({
@@ -110,12 +223,26 @@ export async function POST(
       });
     }
 
-    // Validate project_id exists
-    if (!project.project_id) {
+    // Check if project exists on-chain (even if database isn't synced)
+    let onChainProject = null;
+    let onChainProjectId: bigint | null = null;
+
+    // First, try to read from database project_id
+    if (project.project_id) {
+      onChainProjectId = BigInt(project.project_id);
+      try {
+        onChainProject = await readProject(onChainProjectId);
+      } catch (error) {
+        console.error('Error reading project from contract:', error);
+      }
+    }
+
+    // If not found in database, return error
+    if (!onChainProjectId) {
       return NextResponse.json(
         {
           error: 'Project not registered on-chain',
-          details: 'This project must be registered on-chain before it can receive donations.',
+          details: 'This project must be registered on-chain before it can receive donations. Please complete the on-chain registration first.',
           code: 'PROJECT_NOT_ON_CHAIN',
         },
         { status: 400 }
@@ -123,21 +250,21 @@ export async function POST(
     }
 
     // Verify project is approved on-chain (only approved projects can receive donations)
-    try {
-      const onChainProject = await readProject(BigInt(project.project_id));
-      if (onChainProject && onChainProject.status !== ProjectStatus.Approved) {
+    if (onChainProject) {
+      if (onChainProject.status !== ProjectStatus.Approved) {
         return NextResponse.json(
           {
             error: 'Project is not approved on-chain',
-            details: 'Only projects that have been approved on-chain can receive donations.',
+            details: `Project status on-chain is ${onChainProject.status}, expected ${ProjectStatus.Approved}. Only approved projects can receive donations.`,
             code: 'PROJECT_NOT_APPROVED_ON_CHAIN',
           },
           { status: 400 }
         );
       }
-    } catch (error) {
-      console.error('Error checking project status on-chain:', error);
-      // Continue anyway, let the contract revert if needed
+    } else {
+      // Project ID exists but we couldn't read it - might be a contract issue
+      console.warn(`Project ID ${onChainProjectId} exists in database but could not be read from contract`);
+      // Continue anyway - contract will revert if project doesn't exist
     }
 
     // Check if USDC approval is needed
@@ -146,7 +273,21 @@ export async function POST(
     const needsApproval = allowance < amountWei;
 
     // Prepare donation transaction data
-    const { to, data, chainId } = encodeDonateToProject(BigInt(project.project_id), amount);
+    // Use onChainProjectId (should be same as project.project_id at this point)
+    const projectIdToUse = onChainProjectId || (project.project_id ? BigInt(project.project_id) : null);
+    
+    if (!projectIdToUse) {
+      return NextResponse.json(
+        {
+          error: 'Project ID not available',
+          details: 'Could not determine on-chain project ID. Please ensure the project is registered on-chain.',
+          code: 'PROJECT_ID_MISSING',
+        },
+        { status: 400 }
+      );
+    }
+
+    const { to, data, chainId } = encodeDonateToProject(projectIdToUse, amount);
 
     // Prepare approval transaction if needed
     const approvalTxData = needsApproval ? encodeUSDCApproval(amountWei) : undefined;
@@ -165,11 +306,27 @@ export async function POST(
         chainId: approvalTxData?.chainId,
       } : undefined,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error funding project:', error);
+
+    // Handle authentication errors specifically
+    if (error?.message === 'Unauthorized') {
+      return NextResponse.json(
+        {
+          error: 'Unauthorized',
+          details: 'Please connect your wallet and sign in to donate to projects.',
+          code: 'UNAUTHORIZED',
+        },
+        { status: 401 }
+      );
+    }
+
     return NextResponse.json(
-      { error: 'Failed to fund project' },
-      { status: 500 }
+      {
+        error: error?.message || 'Failed to fund project',
+        details: error?.details || '',
+      },
+      { status: error?.status || 500 }
     );
   }
 }

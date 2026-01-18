@@ -77,18 +77,12 @@ export async function GET(request: NextRequest) {
       throw countError;
     }
 
-    // Build data query
+    // Build data query - query projects first
     let query = supabaseAdmin!
       .from('arcindex_projects')
-      .select(`
-        *,
-        arcindex_ratings_agg (*),
-        arcindex_funding_agg (*)
-      `)
-      .eq('status', 'Approved');
-    
-    // Filter out deleted projects
-    query = query.is('deleted_at', null);
+      .select('*')
+      .eq('status', 'Approved')
+      .is('deleted_at', null);
 
     // Category filter
     if (params.category) {
@@ -100,30 +94,90 @@ export async function GET(request: NextRequest) {
       query = query.or(`name.ilike.%${params.q}%,description.ilike.%${params.q}%`);
     }
 
-    // Sorting
+    // Sorting (we'll sort after fetching aggregates)
     if (params.sort === 'newest') {
       query = query.order('created_at', { ascending: false });
-    } else if (params.sort === 'top_rated') {
-      query = query.order('arcindex_ratings_agg.avg_stars', { ascending: false, nullsFirst: false });
-    } else if (params.sort === 'most_funded') {
-      query = query.order('arcindex_funding_agg.total_usdc', { ascending: false, nullsFirst: false });
     }
 
     // Pagination
     query = query.range(params.offset, params.offset + params.limit - 1);
 
-    const { data, error } = await query;
+    const { data: projectsData, error } = await query;
 
     if (error) {
       throw error;
     }
 
+    if (!projectsData || projectsData.length === 0) {
+      return NextResponse.json({ 
+        projects: [], 
+        count: 0,
+        total: 0
+      });
+    }
+
+    // Fetch aggregates separately for all projects
+    const projectIds = projectsData.map(p => p.id);
+    const [ratingsAggResult, fundingsAggResult] = await Promise.all([
+      supabaseAdmin!
+        .from('arcindex_ratings_agg')
+        .select('*')
+        .in('project_id', projectIds),
+      supabaseAdmin!
+        .from('arcindex_funding_agg')
+        .select('*')
+        .in('project_id', projectIds),
+    ]);
+
+    // Create maps for quick lookup
+    const ratingsMap = new Map(
+      (ratingsAggResult.data || []).map(r => [r.project_id, r])
+    );
+    const fundingsMap = new Map(
+      (fundingsAggResult.data || []).map(f => [f.project_id, f])
+    );
+
     // Transform data to match ProjectWithAggregates type
-    const projects: ProjectWithAggregates[] = (data || []).map((p: any) => ({
-      ...p,
-      rating_agg: p.arcindex_ratings_agg?.[0] || null,
-      funding_agg: p.arcindex_funding_agg?.[0] || null,
-    }));
+    // Parse NUMERIC values correctly (Supabase returns them as strings)
+    let projects: ProjectWithAggregates[] = projectsData.map((p: any) => {
+      const ratingAgg = ratingsMap.get(p.id);
+      const fundingAgg = fundingsMap.get(p.id);
+      
+      return {
+        ...p,
+        rating_agg: ratingAgg ? {
+          ...ratingAgg,
+          avg_stars: typeof ratingAgg.avg_stars === 'string' 
+            ? parseFloat(ratingAgg.avg_stars) 
+            : ratingAgg.avg_stars,
+        } : null,
+        funding_agg: fundingAgg ? {
+          ...fundingAgg,
+          total_usdc: typeof fundingAgg.total_usdc === 'string' 
+            ? parseFloat(fundingAgg.total_usdc) 
+            : fundingAgg.total_usdc,
+        } : null,
+      };
+    });
+
+    // Apply sorting for rating and funding (since we have aggregates now)
+    if (params.sort === 'top_rated') {
+      projects = projects.sort((a, b) => {
+        const aRating = a.rating_agg?.avg_stars || 0;
+        const bRating = b.rating_agg?.avg_stars || 0;
+        return bRating - aRating;
+      });
+    } else if (params.sort === 'most_funded') {
+      projects = projects.sort((a, b) => {
+        const aFunding = typeof a.funding_agg?.total_usdc === 'string' 
+          ? parseFloat(a.funding_agg.total_usdc) 
+          : a.funding_agg?.total_usdc || 0;
+        const bFunding = typeof b.funding_agg?.total_usdc === 'string' 
+          ? parseFloat(b.funding_agg.total_usdc) 
+          : b.funding_agg?.total_usdc || 0;
+        return bFunding - aFunding;
+      });
+    }
 
     return NextResponse.json({ 
       projects, 
@@ -204,8 +258,54 @@ export async function POST(request: NextRequest) {
     // Handle validation errors
     if (error instanceof z.ZodError) {
       console.error('Validation error:', error.errors);
+      
+      // Format validation errors for better user experience
+      const formattedErrors = error.errors.map((err) => {
+        let message = err.message;
+        
+        // Improve specific error messages
+        if (err.code === 'invalid_string' && err.validation === 'url') {
+          message = 'Please include "https://" or "http://" at the beginning of the URL. Example: https://example.com';
+        } else if (err.code === 'too_small') {
+          message = 'This field is required';
+        } else if (err.code === 'too_big') {
+          message = `This field is too long (maximum ${err.maximum} characters)`;
+        } else if (err.code === 'invalid_string' && err.validation === 'regex') {
+          message = 'Contract address must be a valid Ethereum address (0x followed by 40 hexadecimal characters)';
+        }
+        
+        return {
+          path: err.path,
+          message,
+          code: err.code,
+        };
+      });
+      
+      // Create user-friendly error message
+      const fieldNames: Record<string, string> = {
+        'website_url': 'Website URL',
+        'x_url': 'Twitter/X URL',
+        'github_url': 'GitHub URL',
+        'linkedin_url': 'LinkedIn URL',
+        'discord_url': 'Discord URL',
+        'discord_username': 'Discord Username',
+        'description': 'Short Description',
+        'full_description': 'Full Description',
+        'name': 'Project Name',
+        'category': 'Category',
+      };
+      
+      const errorMessages = formattedErrors.map((err) => {
+        const fieldName = err.path[0] ? (fieldNames[err.path[0] as string] || err.path[0]) : 'Field';
+        return `${fieldName}: ${err.message}`;
+      });
+      
       return NextResponse.json(
-        { error: 'Invalid request body', details: JSON.stringify(error.errors) },
+        { 
+          error: 'Validation error',
+          details: errorMessages.join('; '),
+          errors: formattedErrors, // Also include structured errors for programmatic access
+        },
         { status: 400 }
       );
     }

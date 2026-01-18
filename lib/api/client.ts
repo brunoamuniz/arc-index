@@ -13,6 +13,7 @@ class APIError extends Error {
   public status: number;
   public details?: unknown;
   public error?: string;
+  public code?: string;
   public responseData?: unknown;
   public statusText?: string;
 
@@ -105,10 +106,11 @@ async function fetchAPI<T>(
     // Preserve error details for better error handling - use class properties
     error.error = data?.error || data?.message;
     error.details = errorDetails;
+    error.code = data?.code; // Preserve error code from API (e.g., PROJECT_NOT_ON_CHAIN)
     error.status = response.status;
     error.statusText = response.statusText;
     error.responseData = data;
-    
+
     throw error;
   }
 
@@ -287,26 +289,40 @@ export const projectsAPI = {
 
   async registerOnChain(id: string): Promise<{
     success: boolean;
-    createTxData?: {
+    finalizeTxData: {
       to: string;
       data: string;
       chainId: number;
     };
-    approveTxData?: {
-      to: string;
-      data: string;
-      chainId: number;
+    signature?: {
+      signer: string;
+      projectId: string;
+      approvedOwner: string;
+      deadline: string;
+      nonce: string;
     };
-    nftTxData?: {
-      to: string;
-      data: string;
-      chainId: number;
+    contracts: {
+      registry: string;
+      certificateNFT: string;
     };
-    needsCreation: boolean;
-    needsApproval: boolean;
   }> {
     return fetchAPI(`/projects/${id}/register-on-chain`, {
       method: 'POST',
+    });
+  },
+
+  async updateOnChain(id: string, txHash: string): Promise<{
+    success: boolean;
+    project: {
+      id: string;
+      project_id: number;
+      nft_token_id: number;
+    };
+    onChainStatus: number;
+  }> {
+    return fetchAPI(`/projects/${id}/update-on-chain`, {
+      method: 'POST',
+      body: JSON.stringify({ txHash }),
     });
   },
 

@@ -97,6 +97,34 @@ export function encodeApproveProject(projectId: bigint) {
 }
 
 /**
+ * Encode registerApprovedProjectAndMint transaction data
+ * This is the atomic function that registers an already-approved project and mints NFT
+ */
+export function encodeRegisterApprovedProjectAndMint(
+  projectId: bigint,
+  approvedOwner: Address,
+  metadataURI: string,
+  deadline: bigint,
+  nonce: bigint,
+  curatorSignature: `0x${string}`
+) {
+  const { registry } = getContractAddresses();
+  const { chainId } = getChainConfig();
+
+  const data = encodeFunctionData({
+    abi: ArcIndexRegistryABI,
+    functionName: 'registerApprovedProjectAndMint',
+    args: [projectId, approvedOwner, metadataURI, deadline, nonce, curatorSignature],
+  });
+
+  return {
+    to: registry,
+    data,
+    chainId,
+  };
+}
+
+/**
  * Encode rejectProject transaction data (curator only)
  */
 export function encodeRejectProject(projectId: bigint, reason: string) {

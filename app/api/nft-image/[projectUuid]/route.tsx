@@ -1,15 +1,179 @@
-import { ImageResponse } from 'next/og'
 import { NextRequest } from 'next/server'
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
+import sharp from 'sharp'
 
-// Note: Using nodejs runtime for Supabase compatibility
-// Edge runtime has limitations with external API calls
-export const alt = 'Arc Index Approval NFT'
-export const size = {
-  width: 1200,
-  height: 1200,
+// Using nodejs runtime for Supabase compatibility
+// SVG + sharp approach works in both nodejs runtime and Vercel
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+const WIDTH = 1200
+const HEIGHT = 1200
+
+// Escape special characters for SVG
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
 }
-export const contentType = 'image/png'
+
+// Truncate text to fit within a certain width (approximate)
+function truncateText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text
+  return text.substring(0, maxChars - 3) + '...'
+}
+
+// Wrap text into multiple lines for SVG
+function wrapText(text: string, maxCharsPerLine: number): string[] {
+  const words = text.split(' ')
+  const lines: string[] = []
+  let currentLine = ''
+
+  for (const word of words) {
+    const testLine = currentLine ? `${currentLine} ${word}` : word
+    if (testLine.length <= maxCharsPerLine) {
+      currentLine = testLine
+    } else {
+      if (currentLine) lines.push(currentLine)
+      currentLine = word
+    }
+  }
+  if (currentLine) lines.push(currentLine)
+
+  // Limit to 3 lines max
+  if (lines.length > 3) {
+    lines.length = 3
+    lines[2] = truncateText(lines[2], maxCharsPerLine - 3) + '...'
+  }
+
+  return lines
+}
+
+// Generate SVG for the NFT certificate
+function generateSvg(project: {
+  name: string
+  description: string
+  category: string
+  project_id?: number
+  updated_at?: string
+}): string {
+  const approvalDate = project.updated_at
+    ? new Date(project.updated_at).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      })
+    : 'Approved'
+
+  const projectInitial = project.name.charAt(0).toUpperCase()
+  const projectName = escapeXml(truncateText(project.name, 40))
+  const descriptionLines = wrapText(project.description || '', 50).map(line => escapeXml(line))
+  const category = escapeXml(project.category || 'Project')
+
+  return `<svg width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0a"/>
+      <stop offset="50%" style="stop-color:#1a1a1a"/>
+      <stop offset="100%" style="stop-color:#0a0a0a"/>
+    </linearGradient>
+
+    <!-- Border gradient -->
+    <linearGradient id="borderGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="50%" style="stop-color:#8b5cf6"/>
+      <stop offset="100%" style="stop-color:#ec4899"/>
+    </linearGradient>
+
+    <!-- Logo gradient -->
+    <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+
+    <!-- Approved badge gradient -->
+    <linearGradient id="approvedGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10b981"/>
+      <stop offset="100%" style="stop-color:#059669"/>
+    </linearGradient>
+
+    <!-- Project circle gradient -->
+    <linearGradient id="circleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2a2a2a"/>
+      <stop offset="100%" style="stop-color:#1a1a1a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#bgGradient)"/>
+
+  <!-- Decorative border -->
+  <rect x="8" y="8" width="${WIDTH - 16}" height="${HEIGHT - 16}" rx="24" ry="24"
+        fill="none" stroke="url(#borderGradient)" stroke-width="8"/>
+
+  <!-- Header: Logo Box -->
+  <rect x="440" y="80" width="80" height="80" rx="16" fill="url(#logoGradient)"/>
+  <text x="480" y="135" font-family="system-ui, -apple-system, sans-serif" font-size="40"
+        font-weight="bold" fill="white" text-anchor="middle">AI</text>
+
+  <!-- Header: Arc Index text -->
+  <text x="600" y="120" font-family="system-ui, -apple-system, sans-serif" font-size="48"
+        font-weight="bold" fill="white">Arc Index</text>
+  <text x="600" y="155" font-family="system-ui, -apple-system, sans-serif" font-size="24"
+        fill="#a0a0a0">Approval Certificate</text>
+
+  <!-- Project Initial Circle -->
+  <circle cx="600" cy="400" r="200" fill="url(#circleGradient)" stroke="#2a2a2a" stroke-width="4"/>
+  <text x="600" y="440" font-family="system-ui, -apple-system, sans-serif" font-size="120"
+        font-weight="bold" fill="#6366f1" text-anchor="middle">${escapeXml(projectInitial)}</text>
+
+  <!-- Project Name -->
+  <text x="600" y="660" font-family="system-ui, -apple-system, sans-serif" font-size="56"
+        font-weight="bold" fill="white" text-anchor="middle">${projectName}</text>
+
+  <!-- Project Description -->
+  <text x="600" y="710" font-family="system-ui, -apple-system, sans-serif" font-size="26"
+        fill="#a0a0a0" text-anchor="middle">
+    ${descriptionLines.map((line, i) => `<tspan x="600" dy="${i === 0 ? 0 : 32}">${line}</tspan>`).join('\n    ')}
+  </text>
+
+  <!-- Approved Badge -->
+  <rect x="420" y="830" width="360" height="60" rx="12" fill="url(#approvedGradient)"/>
+  <text x="600" y="872" font-family="system-ui, -apple-system, sans-serif" font-size="28"
+        font-weight="bold" fill="white" text-anchor="middle">[OK] APPROVED</text>
+
+  <!-- Category Box -->
+  <rect x="280" y="920" width="280" height="50" rx="8" fill="#1a1a1a" stroke="#2a2a2a" stroke-width="1"/>
+  <text x="420" y="955" font-family="system-ui, -apple-system, sans-serif" font-size="20" text-anchor="middle">
+    <tspan fill="#a0a0a0">Category: </tspan>
+    <tspan fill="white" font-weight="bold">${category}</tspan>
+  </text>
+
+  <!-- Date Box -->
+  <rect x="640" y="920" width="280" height="50" rx="8" fill="#1a1a1a" stroke="#2a2a2a" stroke-width="1"/>
+  <text x="780" y="955" font-family="system-ui, -apple-system, sans-serif" font-size="20" text-anchor="middle">
+    <tspan fill="#a0a0a0">Date: </tspan>
+    <tspan fill="white" font-weight="bold">${escapeXml(approvalDate)}</tspan>
+  </text>
+
+  ${project.project_id ? `
+  <!-- Project ID Box -->
+  <rect x="420" y="1000" width="360" height="50" rx="8" fill="#1a1a1a" stroke="#2a2a2a" stroke-width="1"/>
+  <text x="600" y="1035" font-family="system-ui, -apple-system, sans-serif" font-size="20" text-anchor="middle">
+    <tspan fill="#a0a0a0">Project ID: </tspan>
+    <tspan fill="#6366f1" font-weight="bold">#${project.project_id}</tspan>
+  </text>
+  ` : ''}
+
+  <!-- Footer -->
+  <text x="600" y="${HEIGHT - 40}" font-family="system-ui, -apple-system, sans-serif" font-size="20"
+        fill="#666" text-anchor="middle">arcindex.xyz</text>
+</svg>`
+}
 
 export async function GET(
   request: NextRequest,
@@ -20,7 +184,7 @@ export async function GET(
   }
 
   try {
-    const { projectUuid } = await params;
+    const { projectUuid } = await params
     const { data: project, error } = await supabaseAdmin!
       .from('arcindex_projects')
       .select('*')
@@ -31,229 +195,38 @@ export async function GET(
       return new Response('Project not found', { status: 404 })
     }
 
-    // Format date
-    const approvalDate = project.updated_at 
-      ? new Date(project.updated_at).toLocaleDateString('en-US', { 
-          year: 'numeric', 
-          month: 'long', 
-          day: 'numeric' 
-        })
-      : 'Approved'
+    // Generate SVG
+    const svg = generateSvg(project)
 
-    return new ImageResponse(
-      <div
-        style={{
-          background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0a0a0a 100%)',
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: 'system-ui',
-          position: 'relative',
-          padding: '80px',
-        }}
-      >
-          {/* Decorative border */}
-          <div
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              border: '8px solid',
-              borderImage: 'linear-gradient(135deg, #6366f1, #8b5cf6, #ec4899) 1',
-              borderRadius: '24px',
-            }}
-          />
+    // Convert SVG to PNG using sharp
+    const pngBuffer = await sharp(Buffer.from(svg))
+      .resize(WIDTH, HEIGHT)
+      .png()
+      .toBuffer()
 
-          {/* Header with Arc Index branding */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '60px',
-            }}
-          >
-            <div
-              style={{
-                width: '80',
-                height: '80',
-                borderRadius: '16px',
-                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginRight: '24px',
-              }}
-            >
-              <span style={{ color: '#ffffff', fontSize: '40', fontWeight: 'bold' }}>AI</span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ color: '#ffffff', fontSize: '48', fontWeight: 'bold' }}>Arc Index</span>
-              <span style={{ color: '#a0a0a0', fontSize: '24', marginTop: '4px' }}>Approval Certificate</span>
-            </div>
-          </div>
+    return new Response(pngBuffer, {
+      headers: {
+        'Content-Type': 'image/png',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      },
+    })
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const errorStack = error instanceof Error ? error.stack : undefined
 
-          {/* Project Image or Placeholder */}
-          {project.image_url ? (
-            <img
-              src={project.image_url}
-              alt={project.name}
-              width="400"
-              height="400"
-              style={{
-                borderRadius: '24px',
-                objectFit: 'cover',
-                marginBottom: '40px',
-                border: '4px solid #2a2a2a',
-              }}
-            />
-          ) : (
-            <div
-              style={{
-                width: '400',
-                height: '400',
-                borderRadius: '24px',
-                background: 'linear-gradient(135deg, #2a2a2a, #1a1a1a)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '40px',
-                border: '4px solid #2a2a2a',
-              }}
-            >
-              <span style={{ color: '#6366f1', fontSize: '120', fontWeight: 'bold' }}>
-                {project.name.charAt(0).toUpperCase()}
-              </span>
-            </div>
-          )}
+    console.error('Error generating NFT image:', errorMessage)
+    if (errorStack) console.error('Error stack:', errorStack)
 
-          {/* Project Name */}
-          <h1
-            style={{
-              color: '#ffffff',
-              fontSize: '64',
-              fontWeight: 'bold',
-              textAlign: 'center',
-              marginBottom: '20px',
-              maxWidth: '900px',
-            }}
-          >
-            {project.name}
-          </h1>
-
-          {/* Project Description */}
-          <p
-            style={{
-              color: '#a0a0a0',
-              fontSize: '32',
-              textAlign: 'center',
-              marginBottom: '40px',
-              maxWidth: '900px',
-              lineHeight: '1.4',
-            }}
-          >
-            {project.description}
-          </p>
-
-          {/* Badge and Info Section */}
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '24px',
-              marginTop: '40px',
-            }}
-          >
-            {/* Approved Badge */}
-            <div
-              style={{
-                background: 'linear-gradient(135deg, #10b981, #059669)',
-                padding: '16px 48px',
-                borderRadius: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-              }}
-            >
-              <span style={{ color: '#ffffff', fontSize: '28', fontWeight: 'bold' }}>✓</span>
-              <span style={{ color: '#ffffff', fontSize: '28', fontWeight: 'bold' }}>APPROVED</span>
-            </div>
-
-            {/* Category and Date */}
-            <div
-              style={{
-                display: 'flex',
-                gap: '32px',
-                alignItems: 'center',
-              }}
-            >
-              <div
-                style={{
-                  background: '#1a1a1a',
-                  padding: '12px 24px',
-                  borderRadius: '8px',
-                  border: '1px solid #2a2a2a',
-                }}
-              >
-                <span style={{ color: '#a0a0a0', fontSize: '20' }}>Category: </span>
-                <span style={{ color: '#ffffff', fontSize: '20', fontWeight: 'bold' }}>{project.category}</span>
-              </div>
-              <div
-                style={{
-                  background: '#1a1a1a',
-                  padding: '12px 24px',
-                  borderRadius: '8px',
-                  border: '1px solid #2a2a2a',
-                }}
-              >
-                <span style={{ color: '#a0a0a0', fontSize: '20' }}>Date: </span>
-                <span style={{ color: '#ffffff', fontSize: '20', fontWeight: 'bold' }}>{approvalDate}</span>
-              </div>
-            </div>
-
-            {/* Project ID */}
-            {project.project_id && (
-              <div
-                style={{
-                  background: '#1a1a1a',
-                  padding: '12px 24px',
-                  borderRadius: '8px',
-                  border: '1px solid #2a2a2a',
-                }}
-              >
-                <span style={{ color: '#a0a0a0', fontSize: '20' }}>Project ID: </span>
-                <span style={{ color: '#6366f1', fontSize: '20', fontWeight: 'bold' }}>#{project.project_id}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Footer */}
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '40px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              color: '#666',
-              fontSize: '20',
-            }}
-          >
-            arcindex.xyz
-          </div>
-        </div>,
+    return new Response(
+      JSON.stringify({
+        error: 'Failed to generate NFT image',
+        message: errorMessage,
+        stack: process.env.NODE_ENV === 'development' ? errorStack : undefined,
+      }),
       {
-        ...size,
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
       }
     )
-  } catch (error) {
-    console.error('Error generating NFT image:', error)
-    return new Response('Failed to generate NFT image', { status: 500 })
   }
 }
-

@@ -31,39 +31,50 @@ export async function GET(
     // Generate NFT image URL (dynamically generated)
     const nftImageUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://arcindex.xyz'}/api/nft-image/${project.id}`;
     
+    // Format approval date
+    const approvalDate = project.updated_at || project.created_at;
+    const formattedDate = approvalDate
+      ? new Date(approvalDate).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        })
+      : 'Approved';
+
     // Return metadata in OpenSea/ERC-721 compatible format
     const metadata = {
-      name: `${project.name} - Arc Index Approval`,
-      description: `${project.description}\n\nThis NFT certifies that "${project.name}" has been reviewed and approved by Arc Index curators. It serves as an on-chain verification badge for the project.`,
+      name: `Arc Index Certificate — ${project.name}`,
+      description: `On-chain certificate verifying that "${project.name}" has been reviewed and approved by Arc Index curators. This NFT serves as proof of project ownership and curator certification in the Arc ecosystem.`,
       image: nftImageUrl,
       external_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://arcindex.xyz'}/project/${project.id}`,
       attributes: [
-        {
-          trait_type: 'Category',
-          value: project.category,
-        },
-        {
-          trait_type: 'Status',
-          value: project.status,
-        },
         {
           trait_type: 'Project ID',
           value: project.project_id || project.id,
           display_type: 'number',
         },
         {
+          trait_type: 'Owner',
+          value: project.owner_wallet,
+        },
+        {
+          trait_type: 'Status',
+          value: project.status === 'Approved' ? 'OnChainRegistered' : project.status,
+        },
+        {
+          trait_type: 'Chain',
+          value: 'Arc Testnet',
+        },
+        {
+          trait_type: 'Category',
+          value: project.category,
+        },
+        {
           trait_type: 'Approval Date',
-          value: new Date(project.updated_at || project.created_at).toISOString(),
+          value: approvalDate ? new Date(approvalDate).toISOString() : new Date().toISOString(),
           display_type: 'date',
         },
       ],
-      properties: {
-        category: project.category,
-        owner: project.owner_wallet,
-        github: project.github_url,
-        website: project.website_url,
-        project_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://arcindex.xyz'}/project/${project.id}`,
-      },
     };
 
     return NextResponse.json(metadata, {

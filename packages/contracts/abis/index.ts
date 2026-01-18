@@ -16,8 +16,12 @@ export const ArcIndexRegistryABI = [
   { inputs: [], name: "InvalidFeeBps", type: "error" },
   { inputs: [], name: "InvalidRating", type: "error" },
   { inputs: [], name: "InvalidStatus", type: "error" },
+  { inputs: [], name: "InvalidSignature", type: "error" },
+  { inputs: [], name: "NotCurator", type: "error" },
   { inputs: [], name: "NotProjectOwner", type: "error" },
+  { inputs: [], name: "NonceAlreadyUsed", type: "error" },
   { inputs: [], name: "ProjectNotFound", type: "error" },
+  { inputs: [], name: "SignatureExpired", type: "error" },
   {
     anonymous: false,
     inputs: [{ indexed: true, name: "curator", type: "address" }],
@@ -80,6 +84,17 @@ export const ArcIndexRegistryABI = [
       { indexed: false, name: "reason", type: "string" },
     ],
     name: "ProjectRejected",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "projectId", type: "uint256" },
+      { indexed: true, name: "owner", type: "address" },
+      { indexed: true, name: "finalizer", type: "address" },
+      { indexed: false, name: "certificateTokenId", type: "uint256" },
+    ],
+    name: "ProjectFinalized",
     type: "event",
   },
   {
@@ -222,6 +237,13 @@ export const ArcIndexRegistryABI = [
   },
   {
     inputs: [],
+    name: "PROJECT_APPROVAL_TYPEHASH",
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
     name: "pause",
     outputs: [],
     stateMutability: "nonpayable",
@@ -251,6 +273,23 @@ export const ArcIndexRegistryABI = [
     ],
     name: "rejectProject",
     outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "projectId", type: "uint256" },
+      { name: "approvedOwner", type: "address" },
+      { name: "metadataURI", type: "string" },
+      { name: "deadline", type: "uint256" },
+      { name: "nonce", type: "uint256" },
+      { name: "curatorSignature", type: "bytes" },
+    ],
+    name: "registerApprovedProjectAndMint",
+    outputs: [
+      { name: "", type: "uint256" },
+      { name: "", type: "uint256" },
+    ],
     stateMutability: "nonpayable",
     type: "function",
   },
@@ -304,6 +343,13 @@ export const ArcIndexRegistryABI = [
     name: "updateProjectMetadata",
     outputs: [],
     stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "", type: "uint256" }],
+    name: "usedApprovalNonces",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
     type: "function",
   },
 ] as const;

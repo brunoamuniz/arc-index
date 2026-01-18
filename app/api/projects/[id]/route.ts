@@ -44,32 +44,62 @@ export async function GET(
       );
     }
 
+    // Query project
     let query = supabaseAdmin!
       .from('arcindex_projects')
-      .select(`
-        *,
-        arcindex_ratings_agg (*),
-        arcindex_funding_agg (*)
-      `)
-      .eq('id', projectId);
+      .select('*')
+      .eq('id', projectId)
+      .is('deleted_at', null)
+      .single();
     
-    // Filter out deleted projects
-    query = query.is('deleted_at', null);
-    
-    const { data, error } = await query.single();
+    const { data: projectData, error: projectError } = await query;
 
-    if (error || !data) {
+    if (projectError || !projectData) {
       return NextResponse.json(
         { error: 'Project not found' },
         { status: 404 }
       );
     }
 
+    // Query aggregates separately to ensure we get them
+    const [ratingAggResult, fundingAggResult] = await Promise.all([
+      supabaseAdmin!
+        .from('arcindex_ratings_agg')
+        .select('*')
+        .eq('project_id', projectId)
+        .maybeSingle(),
+      supabaseAdmin!
+        .from('arcindex_funding_agg')
+        .select('*')
+        .eq('project_id', projectId)
+        .maybeSingle(),
+    ]);
+
+    // Parse NUMERIC values correctly (Supabase returns them as strings)
     const project: ProjectWithAggregates = {
-      ...data,
-      rating_agg: data.arcindex_ratings_agg?.[0] || null,
-      funding_agg: data.arcindex_funding_agg?.[0] || null,
+      ...projectData,
+      rating_agg: ratingAggResult.data ? {
+        ...ratingAggResult.data,
+        avg_stars: typeof ratingAggResult.data.avg_stars === 'string' 
+          ? parseFloat(ratingAggResult.data.avg_stars) 
+          : ratingAggResult.data.avg_stars,
+      } : null,
+      funding_agg: fundingAggResult.data ? {
+        ...fundingAggResult.data,
+        total_usdc: typeof fundingAggResult.data.total_usdc === 'string' 
+          ? parseFloat(fundingAggResult.data.total_usdc) 
+          : fundingAggResult.data.total_usdc,
+      } : null,
     };
+
+    // Log what we're returning for debugging
+    console.log('Project API response:', {
+      projectId: project.id,
+      rating_agg: project.rating_agg,
+      funding_agg: project.funding_agg,
+      raw_total_usdc: fundingAggResult.data?.total_usdc,
+      parsed_total_usdc: project.funding_agg?.total_usdc,
+    });
 
     return NextResponse.json({ project });
   } catch (error) {

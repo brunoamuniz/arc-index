@@ -11,7 +11,8 @@
     "contracts:deploy": "cd packages/contracts && npx hardhat run scripts/deploy.ts",
     "contracts:test": "cd packages/contracts && npx hardhat test",
     "indexer:dev": "tsx indexer/index.ts",
-    "db:migrate": "echo 'Run migrations manually in Supabase dashboard or via CLI'"
+    "db:migrate": "echo 'Run migrations manually in Supabase dashboard or via CLI'",
+    "test:nft-metadata": "tsx packages/contracts/scripts/test-nft-metadata.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

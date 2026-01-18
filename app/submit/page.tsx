@@ -46,6 +46,7 @@ export default function SubmitProjectPage() {
     linkedin: "",
     contractAddress: "",
   })
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   // Load project data if in edit mode
   useEffect(() => {
@@ -98,6 +99,99 @@ export default function SubmitProjectPage() {
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
+    // Clear error for this field when user starts typing
+    if (fieldErrors[field]) {
+      setFieldErrors((prev) => {
+        const newErrors = { ...prev }
+        delete newErrors[field]
+        return newErrors
+      })
+    }
+  }
+
+  // Validate URL format
+  const validateUrl = (url: string, fieldName: string): string | null => {
+    if (!url || url.trim() === '') return null
+    const trimmed = url.trim()
+    
+    // Check if it starts with http:// or https://
+    if (!trimmed.match(/^https?:\/\//i)) {
+      return `Please include "https://" or "http://" at the beginning of the URL. Example: https://example.com`
+    }
+    
+    try {
+      new URL(trimmed)
+      return null // Valid URL
+    } catch {
+      return `Please enter a valid URL. Example: https://example.com`
+    }
+  }
+
+  // Validate all fields before submission
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {}
+
+    // Required fields
+    if (!formData.name.trim()) {
+      errors.name = 'Project name is required'
+    } else if (formData.name.length > 200) {
+      errors.name = 'Project name must be 200 characters or less'
+    }
+
+    if (!formData.shortDescription.trim()) {
+      errors.shortDescription = 'Short description is required'
+    } else if (formData.shortDescription.length > 400) {
+      errors.shortDescription = 'Short description must be 400 characters or less'
+    }
+
+    if (!formData.longDescription.trim()) {
+      errors.longDescription = 'Full description is required'
+    } else if (formData.longDescription.length > 5000) {
+      errors.longDescription = 'Full description must be 5000 characters or less'
+    }
+
+    if (!formData.category) {
+      errors.category = 'Please select a category'
+    }
+
+    // Website URL validation (required)
+    if (!formData.website.trim()) {
+      errors.website = 'Website URL is required'
+    } else {
+      const websiteError = validateUrl(formData.website, 'website')
+      if (websiteError) errors.website = websiteError
+    }
+
+    // Optional URL fields
+    if (formData.twitter.trim()) {
+      const twitterError = validateUrl(formData.twitter, 'twitter')
+      if (twitterError) errors.twitter = twitterError
+    }
+
+    if (formData.github.trim()) {
+      const githubError = validateUrl(formData.github, 'github')
+      if (githubError) errors.github = githubError
+    }
+
+    if (formData.linkedin.trim()) {
+      const linkedinError = validateUrl(formData.linkedin, 'linkedin')
+      if (linkedinError) errors.linkedin = linkedinError
+    }
+
+    if (formData.discord.trim()) {
+      const discordError = validateUrl(formData.discord, 'discord')
+      if (discordError) errors.discord = discordError
+    }
+
+    // Contract address validation (if provided)
+    if (formData.contractAddress.trim()) {
+      if (!formData.contractAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
+        errors.contractAddress = 'Contract address must be a valid Ethereum address (0x followed by 40 hexadecimal characters)'
+      }
+    }
+
+    setFieldErrors(errors)
+    return Object.keys(errors).length === 0
   }
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -131,10 +225,17 @@ export default function SubmitProjectPage() {
       return
     }
 
-    if (!formData.name || !formData.shortDescription || !formData.longDescription || !formData.category || !formData.website) {
+    // Validate form before submission
+    if (!validateForm()) {
+      const errorFields = Object.keys(fieldErrors)
+      const errorMessages = errorFields.map(field => {
+        const fieldName = field.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
+        return `${fieldName}: ${fieldErrors[field]}`
+      })
+      
       toast({
-        title: "Missing information",
-        description: "Please fill in all required fields including Website URL",
+        title: "Please fix the errors",
+        description: errorMessages.join('\n'),
         variant: "destructive",
       })
       return
@@ -142,6 +243,7 @@ export default function SubmitProjectPage() {
 
     try {
       setIsSubmitting(true)
+      setFieldErrors({}) // Clear errors when submitting
 
       if (isEditMode && projectId) {
         // Update existing project
@@ -203,13 +305,9 @@ export default function SubmitProjectPage() {
       }
     } catch (error: any) {
       console.error("Error saving project:", error)
-      const errorMessage = error.message || error.error || `Failed to ${isEditMode ? 'update' : 'create'} project`
-      const errorDetails = error.details 
-        ? (typeof error.details === 'string' ? error.details : JSON.stringify(error.details))
-        : ''
       
       // Handle authentication errors
-      if (error.status === 401 || errorMessage.includes('Authentication') || errorMessage.includes('Unauthorized')) {
+      if (error.status === 401 || error.message?.includes('Authentication') || error.message?.includes('Unauthorized')) {
         toast({
           title: "Authentication required",
           description: "Please connect your wallet and sign in.",
@@ -220,12 +318,106 @@ export default function SubmitProjectPage() {
         }
         return
       }
-      
-      toast({
-        title: `Error ${isEditMode ? 'updating' : 'creating'} project`,
-        description: errorDetails ? `${errorMessage}\n\n${errorDetails}` : errorMessage,
-        variant: "destructive",
-      })
+
+      // Parse validation errors from backend
+      let validationErrors: Record<string, string> = {}
+      let userFriendlyMessage = error.message || error.error || `Failed to ${isEditMode ? 'update' : 'create'} project`
+
+      // Try to parse validation errors from backend
+      // Backend now returns errors in two formats:
+      // 1. error.errors (structured array)
+      // 2. error.details (formatted string)
+      if (error.errors && Array.isArray(error.errors)) {
+        // Use structured errors array (new format)
+        error.errors.forEach((err: any) => {
+          if (err.path && err.path.length > 0) {
+            const fieldName = err.path[0]
+            // Map backend field names to frontend field names
+            const frontendFieldName = fieldName === 'website_url' ? 'website' :
+                                     fieldName === 'x_url' ? 'twitter' :
+                                     fieldName === 'github_url' ? 'github' :
+                                     fieldName === 'linkedin_url' ? 'linkedin' :
+                                     fieldName === 'discord_url' ? 'discord' :
+                                     fieldName === 'discord_username' ? 'discordUsername' :
+                                     fieldName === 'description' ? 'shortDescription' :
+                                     fieldName === 'full_description' ? 'longDescription' :
+                                     fieldName
+            
+            validationErrors[frontendFieldName] = err.message || 'Invalid value'
+          }
+        })
+      } else if (error.details) {
+        // Fallback to parsing details string (old format)
+        try {
+          const parsedDetails = typeof error.details === 'string' ? JSON.parse(error.details) : error.details
+          
+          if (Array.isArray(parsedDetails)) {
+            parsedDetails.forEach((err: any) => {
+              if (err.path && err.path.length > 0) {
+                const fieldName = err.path[0]
+                const frontendFieldName = fieldName === 'website_url' ? 'website' :
+                                         fieldName === 'x_url' ? 'twitter' :
+                                         fieldName === 'github_url' ? 'github' :
+                                         fieldName === 'linkedin_url' ? 'linkedin' :
+                                         fieldName === 'discord_url' ? 'discord' :
+                                         fieldName === 'discord_username' ? 'discordUsername' :
+                                         fieldName === 'description' ? 'shortDescription' :
+                                         fieldName === 'full_description' ? 'longDescription' :
+                                         fieldName
+                
+                let errorMsg = err.message || 'Invalid value'
+                
+                // Improve specific error messages
+                if (err.code === 'invalid_string' && err.validation === 'url') {
+                  if (!formData[frontendFieldName as keyof typeof formData]?.toString().match(/^https?:\/\//i)) {
+                    errorMsg = 'Please include "https://" or "http://" at the beginning of the URL'
+                  } else {
+                    errorMsg = 'Please enter a valid URL. Example: https://example.com'
+                  }
+                } else if (err.code === 'too_small') {
+                  errorMsg = `This field is required`
+                } else if (err.code === 'too_big') {
+                  errorMsg = `This field is too long (maximum ${err.maximum} characters)`
+                } else if (err.code === 'invalid_string' && err.validation === 'regex') {
+                  errorMsg = 'Contract address must be a valid Ethereum address (0x followed by 40 hexadecimal characters)'
+                }
+                
+                validationErrors[frontendFieldName] = errorMsg
+              }
+            })
+          }
+        } catch (parseError) {
+          // If parsing fails, use the raw details as a general message
+          console.error('Error parsing validation details:', parseError)
+          if (typeof error.details === 'string' && !error.details.startsWith('{')) {
+            userFriendlyMessage = error.details
+          }
+        }
+      }
+
+      // Set field errors if we found any
+      if (Object.keys(validationErrors).length > 0) {
+        setFieldErrors(validationErrors)
+        
+        const errorFields = Object.keys(validationErrors)
+        const errorMessages = errorFields.map(field => {
+          const fieldName = field.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
+          return `${fieldName}: ${validationErrors[field]}`
+        })
+        
+        toast({
+          title: "Please fix the errors",
+          description: errorMessages.join('\n'),
+          variant: "destructive",
+        })
+      } else {
+        // Generic error if no specific validation errors
+        toast({
+          title: `Error ${isEditMode ? 'updating' : 'creating'} project`,
+          description: userFriendlyMessage,
+          variant: "destructive",
+        })
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -438,7 +630,11 @@ export default function SubmitProjectPage() {
                       value={formData.name}
                       onChange={(e) => handleInputChange("name", e.target.value)}
                       placeholder="My Awesome Project"
+                      className={fieldErrors.name ? "border-destructive" : ""}
                     />
+                    {fieldErrors.name && (
+                      <p className="text-sm text-destructive">{fieldErrors.name}</p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -461,10 +657,15 @@ export default function SubmitProjectPage() {
                       placeholder="A brief one-line description of your project"
                       rows={2}
                       maxLength={400}
+                      className={fieldErrors.shortDescription ? "border-destructive" : ""}
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Maximum 400 characters. This will be displayed in project cards and listings.
-                    </p>
+                    {fieldErrors.shortDescription ? (
+                      <p className="text-sm text-destructive">{fieldErrors.shortDescription}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Maximum 400 characters. This will be displayed in project cards and listings.
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -487,10 +688,15 @@ export default function SubmitProjectPage() {
                       placeholder="Describe your project in detail..."
                       rows={6}
                       maxLength={5000}
+                      className={fieldErrors.longDescription ? "border-destructive" : ""}
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Maximum 5000 characters. Provide a detailed description of your project, its features, and goals.
-                    </p>
+                    {fieldErrors.longDescription ? (
+                      <p className="text-sm text-destructive">{fieldErrors.longDescription}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Maximum 5000 characters. Provide a detailed description of your project, its features, and goals.
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -498,7 +704,7 @@ export default function SubmitProjectPage() {
                       Category <span className="text-destructive">*</span>
                     </Label>
                     <Select value={formData.category} onValueChange={(value) => handleInputChange("category", value)}>
-                      <SelectTrigger>
+                      <SelectTrigger className={fieldErrors.category ? "border-destructive" : ""}>
                         <SelectValue placeholder="Select a category" />
                       </SelectTrigger>
                       <SelectContent>
@@ -509,6 +715,9 @@ export default function SubmitProjectPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {fieldErrors.category && (
+                      <p className="text-sm text-destructive">{fieldErrors.category}</p>
+                    )}
                   </div>
 
                   {/* Social Media & Links Section */}
@@ -526,7 +735,13 @@ export default function SubmitProjectPage() {
                         value={formData.website}
                         onChange={(e) => handleInputChange("website", e.target.value)}
                         placeholder="https://yourproject.com"
+                        className={fieldErrors.website ? "border-destructive" : ""}
                       />
+                      {fieldErrors.website ? (
+                        <p className="text-sm text-destructive">{fieldErrors.website}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Must start with https:// or http://</p>
+                      )}
                     </div>
 
                     {/* GitHub */}
@@ -538,7 +753,11 @@ export default function SubmitProjectPage() {
                         value={formData.github}
                         onChange={(e) => handleInputChange("github", e.target.value)}
                         placeholder="https://github.com/yourproject"
+                        className={fieldErrors.github ? "border-destructive" : ""}
                       />
+                      {fieldErrors.github && (
+                        <p className="text-sm text-destructive">{fieldErrors.github}</p>
+                      )}
                     </div>
 
                     {/* LinkedIn */}
@@ -550,7 +769,11 @@ export default function SubmitProjectPage() {
                         value={formData.linkedin}
                         onChange={(e) => handleInputChange("linkedin", e.target.value)}
                         placeholder="https://linkedin.com/company/yourproject"
+                        className={fieldErrors.linkedin ? "border-destructive" : ""}
                       />
+                      {fieldErrors.linkedin && (
+                        <p className="text-sm text-destructive">{fieldErrors.linkedin}</p>
+                      )}
                     </div>
 
                     {/* Twitter */}
@@ -562,7 +785,11 @@ export default function SubmitProjectPage() {
                         value={formData.twitter}
                         onChange={(e) => handleInputChange("twitter", e.target.value)}
                         placeholder="https://twitter.com/yourproject"
+                        className={fieldErrors.twitter ? "border-destructive" : ""}
                       />
+                      {fieldErrors.twitter && (
+                        <p className="text-sm text-destructive">{fieldErrors.twitter}</p>
+                      )}
                     </div>
 
                     {/* Discord */}
@@ -575,7 +802,11 @@ export default function SubmitProjectPage() {
                           value={formData.discord}
                           onChange={(e) => handleInputChange("discord", e.target.value)}
                           placeholder="https://discord.gg/yourproject"
+                          className={fieldErrors.discord ? "border-destructive" : ""}
                         />
+                        {fieldErrors.discord && (
+                          <p className="text-sm text-destructive">{fieldErrors.discord}</p>
+                        )}
                       </div>
 
                       <div className="space-y-2">
@@ -600,8 +831,13 @@ export default function SubmitProjectPage() {
                           value={formData.contractAddress}
                           onChange={(e) => handleInputChange("contractAddress", e.target.value)}
                           placeholder="0x..."
+                          className={fieldErrors.contractAddress ? "border-destructive" : ""}
                         />
-                        <p className="text-xs text-muted-foreground">Main contract address (optional)</p>
+                        {fieldErrors.contractAddress ? (
+                          <p className="text-sm text-destructive">{fieldErrors.contractAddress}</p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">Main contract address (optional)</p>
+                        )}
                       </div>
                     </div>
                   </div>

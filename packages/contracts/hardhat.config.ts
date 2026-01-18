@@ -7,15 +7,16 @@ import { resolve } from "path";
 dotenv.config({ path: resolve(__dirname, "../../.env.local") });
 
 const config: HardhatUserConfig = {
-  solidity: {
-    version: "0.8.20",
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 200,
+    solidity: {
+      version: "0.8.20",
+      settings: {
+        optimizer: {
+          enabled: true,
+          runs: 200,
+        },
+        viaIR: true, // Enable IR-based compilation to handle stack too deep errors
       },
     },
-  },
   networks: {
     hardhat: {
       chainId: 1337,

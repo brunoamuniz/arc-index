@@ -14,6 +14,7 @@
     "deploy:localhost": "hardhat run scripts/deploy.ts --network localhost",
     "deploy:arc-index": "hardhat run scripts/deploy-arc-index.ts --network arc",
     "deploy:arc-index:localhost": "hardhat run scripts/deploy-arc-index.ts --network localhost",
+    "verify:registry": "hardhat run scripts/verify-registry.ts --network arc",
     "test": "hardhat test"
   },
   "devDependencies": {
