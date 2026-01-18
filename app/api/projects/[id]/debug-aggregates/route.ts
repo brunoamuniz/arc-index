@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server';
-import { requireAuth } from '@/lib/auth/session';
+import { requireCuratorOrAdmin } from '@/lib/auth/session';
 
 /**
  * Debug endpoint to check aggregates for a project
  * GET /api/projects/[id]/debug-aggregates
+ *
+ * Restricted to curators and admins only for security
  */
 export async function GET(
   request: NextRequest,
@@ -18,7 +20,8 @@ export async function GET(
   }
 
   try {
-    await requireAuth();
+    // Restrict to curators/admins only - this endpoint exposes internal data
+    await requireCuratorOrAdmin();
     const resolvedParams = await Promise.resolve(params);
     const projectId = resolvedParams.id;
 

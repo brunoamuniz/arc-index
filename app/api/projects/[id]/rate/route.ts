@@ -295,9 +295,11 @@ export async function POST(
       );
     }
 
-    // Return more detailed error information
+    // Return error information (hide stack traces in production)
     const errorMessage = error?.message || 'Failed to rate project';
-    const errorDetails = error?.details || error?.stack || '';
+    const errorDetails = process.env.NODE_ENV === 'development'
+      ? (error?.details || error?.stack || '')
+      : (error?.details || '');
 
     return NextResponse.json(
       {
