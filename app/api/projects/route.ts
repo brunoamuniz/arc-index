@@ -78,6 +78,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Build data query - query projects first
+    // For top_rated and most_funded, we need to fetch ALL matching projects first,
+    // then sort by aggregate data, then paginate. For newest, we can sort in the query.
     let query = supabaseAdmin!
       .from('arcindex_projects')
       .select('*')
@@ -94,13 +96,14 @@ export async function GET(request: NextRequest) {
       query = query.or(`name.ilike.%${params.q}%,description.ilike.%${params.q}%`);
     }
 
-    // Sorting (we'll sort after fetching aggregates)
+    // For 'newest' sort, we can apply sorting and pagination directly in the query
+    // For 'top_rated' and 'most_funded', we need to fetch all projects first, then sort by aggregates
     if (params.sort === 'newest') {
       query = query.order('created_at', { ascending: false });
+      // Apply pagination only for newest (where sorting happens in DB)
+      query = query.range(params.offset, params.offset + params.limit - 1);
     }
-
-    // Pagination
-    query = query.range(params.offset, params.offset + params.limit - 1);
+    // For top_rated and most_funded, we DON'T apply pagination here - we'll do it after sorting
 
     const { data: projectsData, error } = await query;
 
@@ -162,21 +165,27 @@ export async function GET(request: NextRequest) {
 
     // Apply sorting for rating and funding (since we have aggregates now)
     if (params.sort === 'top_rated') {
-      projects = projects.sort((a, b) => {
+      projects.sort((a, b) => {
         const aRating = a.rating_agg?.avg_stars || 0;
         const bRating = b.rating_agg?.avg_stars || 0;
+        // If ratings are equal, use ratings_count as tiebreaker
+        if (bRating === aRating) {
+          return (b.rating_agg?.ratings_count || 0) - (a.rating_agg?.ratings_count || 0);
+        }
         return bRating - aRating;
       });
     } else if (params.sort === 'most_funded') {
-      projects = projects.sort((a, b) => {
-        const aFunding = typeof a.funding_agg?.total_usdc === 'string' 
-          ? parseFloat(a.funding_agg.total_usdc) 
-          : a.funding_agg?.total_usdc || 0;
-        const bFunding = typeof b.funding_agg?.total_usdc === 'string' 
-          ? parseFloat(b.funding_agg.total_usdc) 
-          : b.funding_agg?.total_usdc || 0;
+      projects.sort((a, b) => {
+        // Values are already parsed to numbers in the transform above
+        const aFunding = a.funding_agg?.total_usdc || 0;
+        const bFunding = b.funding_agg?.total_usdc || 0;
         return bFunding - aFunding;
       });
+    }
+
+    // Apply pagination AFTER sorting for non-newest sorts
+    if (params.sort !== 'newest') {
+      projects = projects.slice(params.offset, params.offset + params.limit);
     }
 
     return NextResponse.json({ 
